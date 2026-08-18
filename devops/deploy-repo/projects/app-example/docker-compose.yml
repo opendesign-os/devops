@@ -1,0 +1,23 @@
+# 多容器自研应用的编排模板（单容器应用直接用 Dokploy 的 Application 类型，不需要本文件）
+# 在 Dokploy 中创建 Compose 服务，Provider 选 Git，指向本仓库此文件路径
+# 变量由 Dokploy 写入同目录 .env，compose 自动读取用于插值
+
+services:
+  app:
+    image: ${REGISTRY}/${REGISTRY_NS}/${APP_NAME}:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+    networks:
+      - default
+      - dokploy-network
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE}
+        max-file: ${LOG_MAX_FILE}
+
+networks:
+  # Traefik 经此网络路由到容器，Dokploy 已创建
+  dokploy-network:
+    external: true

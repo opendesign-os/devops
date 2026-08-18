@@ -1,0 +1,224 @@
+x-db-env: &db-env
+  PGHOST: plane-db
+  PGDATABASE: ${POSTGRES_DB}
+  POSTGRES_USER: ${POSTGRES_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  POSTGRES_DB: ${POSTGRES_DB}
+  POSTGRES_PORT: 5432
+  PGDATA: /var/lib/postgresql/data
+
+x-redis-env: &redis-env
+  REDIS_HOST: plane-redis
+  REDIS_PORT: 6379
+  REDIS_URL: redis://plane-redis:6379/
+
+x-minio-env: &minio-env
+  MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID}
+  MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY}
+
+x-s3-env: &s3-env
+  AWS_REGION: ${AWS_REGION}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+  AWS_S3_ENDPOINT_URL: http://plane-minio:9000
+  AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME}
+  USE_MINIO: 1
+
+x-mq-env: &mq-env
+  RABBITMQ_HOST: plane-mq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+  RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+  RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST}
+  RABBITMQ_VHOST: ${RABBITMQ_VHOST}
+
+x-proxy-env: &proxy-env
+  APP_DOMAIN: ${APP_DOMAIN}
+  SITE_ADDRESS: ${SITE_ADDRESS}
+  FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT}
+  CERT_EMAIL: ${CERT_EMAIL}
+  CERT_ACME_CA: ${CERT_ACME_CA}
+  CERT_ACME_DNS: ${CERT_ACME_DNS}
+  TRUSTED_PROXIES: ${TRUSTED_PROXIES}
+  BUCKET_NAME: ${AWS_S3_BUCKET_NAME}
+
+x-live-env: &live-env
+  API_BASE_URL: http://api:8000
+  LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY}
+
+# 连接串由账号密码直接拼装，改密码只需改 .env 一处
+x-app-env: &app-env
+  WEB_URL: ${WEB_URL}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+  DEBUG: 0
+  SECRET_KEY: ${SECRET_KEY}
+  LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY}
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@plane-db:5432/${POSTGRES_DB}
+  AMQP_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@plane-mq:5672/${RABBITMQ_VHOST}
+  GUNICORN_WORKERS: ${GUNICORN_WORKERS}
+  MINIO_ENDPOINT_SSL: ${MINIO_ENDPOINT_SSL}
+  API_KEY_RATE_LIMIT: ${API_KEY_RATE_LIMIT}
+  AUTHENTICATION_RATE_LIMIT: ${AUTHENTICATION_RATE_LIMIT}
+
+services:
+  # 数据库迁移，一次性任务，跑完退出
+  migrator:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-backend:${APP_RELEASE}
+    command: ./bin/docker-entrypoint-migrator.sh
+    restart: "no"
+    environment:
+      <<: [*app-env, *db-env, *redis-env, *minio-env, *s3-env, *proxy-env]
+    volumes:
+      - logs_migrator:/code/plane/logs
+    depends_on:
+      plane-db:
+        condition: service_healthy
+      plane-redis:
+        condition: service_healthy
+
+  api:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-backend:${APP_RELEASE}
+    command: ./bin/docker-entrypoint-api.sh
+    restart: unless-stopped
+    environment:
+      <<: [*app-env, *db-env, *redis-env, *minio-env, *s3-env, *proxy-env]
+    volumes:
+      - logs_api:/code/plane/logs
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      plane-mq:
+        condition: service_healthy
+
+  worker:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-backend:${APP_RELEASE}
+    command: ./bin/docker-entrypoint-worker.sh
+    restart: unless-stopped
+    environment:
+      <<: [*app-env, *db-env, *redis-env, *minio-env, *s3-env, *proxy-env]
+    volumes:
+      - logs_worker:/code/plane/logs
+    depends_on:
+      - api
+
+  beat-worker:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-backend:${APP_RELEASE}
+    command: ./bin/docker-entrypoint-beat.sh
+    restart: unless-stopped
+    environment:
+      <<: [*app-env, *db-env, *redis-env, *minio-env, *s3-env, *proxy-env]
+    volumes:
+      - logs_beat:/code/plane/logs
+    depends_on:
+      - api
+
+  web:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-frontend:${APP_RELEASE}
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  space:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-space:${APP_RELEASE}
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  admin:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-admin:${APP_RELEASE}
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  live:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-live:${APP_RELEASE}
+    restart: unless-stopped
+    environment:
+      <<: [*live-env, *redis-env]
+    depends_on:
+      - api
+
+  plane-db:
+    image: ${REGISTRY_CACHE:-docker.io}/library/postgres:15.7-alpine
+    command: postgres -c 'max_connections=1000'
+    restart: unless-stopped
+    environment:
+      <<: *db-env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  plane-redis:
+    image: ${REGISTRY_CACHE:-docker.io}/valkey/valkey:7.2.11-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  plane-mq:
+    image: ${REGISTRY_CACHE:-docker.io}/library/rabbitmq:3.13.6-management-alpine
+    restart: unless-stopped
+    environment:
+      <<: *mq-env
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  # 使用外部 S3/OSS 时可删除本服务，并在 .env 中改 AWS_* 配置
+  plane-minio:
+    image: ${REGISTRY_CACHE:-docker.io}/minio/minio:latest
+    command: server /export --console-address ":9090"
+    restart: unless-stopped
+    environment:
+      <<: *minio-env
+    volumes:
+      - uploads:/export
+
+  # 内部入口，不映射宿主机端口。在 Dokploy 里给本服务配域名，
+  # 由 Traefik 经 dokploy-network 路由到此容器的 80 端口
+  proxy:
+    image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-proxy:${APP_RELEASE}
+    restart: unless-stopped
+    environment:
+      <<: *proxy-env
+    volumes:
+      - proxy_config:/config
+      - proxy_data:/data
+    networks:
+      - default
+      - dokploy-network
+    depends_on:
+      - web
+      - space
+      - admin
+      - live
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  rabbitmq_data:
+  proxy_config:
+  proxy_data:
+  logs_api:
+  logs_worker:
+  logs_beat:
+  logs_migrator:
+
+networks:
+  dokploy-network:
+    external: true
