@@ -7,7 +7,7 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 | 编排文件 | 部署仓库 `projects/plane/compose.yaml` |
 | 变量清单 | [../deploy/env/plane.env](../deploy/env/plane.env)，实际填在 Dokploy 服务的 Environment |
 | 运行机器 | 机器 B |
-| 数据存放 | docker 命名卷（第三方栈不用 bind mount，原因见 [../layout.md](../layout.md) 第三节） |
+| 数据存放 | docker 命名卷（第三方栈不用 bind mount，原因见 [../layout.md](../layout.md) 第四节） |
 | 域名 | 在 Dokploy 的 Domains 里指向 `proxy` 服务的 80 端口 |
 
 ## 一、环境要求

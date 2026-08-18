@@ -11,7 +11,7 @@ Zot 是 CNCF 的 OCI 原生镜像仓库，单进程单容器，常驻内存 100~
 | 机器 | 机器 A，与 Dokploy 同机 |
 | 内存 | 常驻 100~200 MB；开启 CVE 扫描后另计 |
 | 磁盘 | `/srv/registry/data` 预留 60 GB |
-| **前置** | **两台机器间的 WireGuard 隧道已建立**，见 [../README.md](../README.md) 第四、五节 |
+| **前置** | **两台机器间的 WireGuard 隧道已建立**，见 [../README.md](../README.md) 第三、四节 |
 | 主机名 | `registry.internal` → 机器 A 隧道地址 `10.8.0.1` |
 | 端口 | 5000，只绑定在隧道地址上 |
 | 客户端 | 两台机器 daemon 都要配 `insecure-registries` |
