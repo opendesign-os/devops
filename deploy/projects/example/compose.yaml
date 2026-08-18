@@ -8,6 +8,10 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ}
+    volumes:
+      # 自研应用的持久化数据用 bind mount：路径可见、备份直观、容器内 UID 由自己的
+      # Dockerfile 决定。第三方栈请改用命名卷，原因见 layout.md 第三节
+      - ${APPDATA_ROOT}/${APP_NAME}/data:/app/data
     networks:
       - default
       - dokploy-network

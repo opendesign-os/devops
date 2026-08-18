@@ -1,0 +1,127 @@
+{
+  "distSpecVersion": "1.1.0",
+
+  "storage": {
+    "rootDirectory": "/var/lib/registry",
+    "dedupe": true,
+    "gc": true,
+    "gcDelay": "1h",
+    "gcInterval": "24h",
+
+    "retention": {
+      "dryRun": false,
+      "delay": "24h",
+      "policies": [
+        {
+          "repositories": ["apps/**"],
+          "deleteUntagged": true,
+          "keepTags": [
+            {
+              "patterns": [".*"],
+              "mostRecentlyPushedCount": 10
+            }
+          ]
+        },
+        {
+          "repositories": ["docker/**"],
+          "deleteUntagged": true,
+          "keepTags": [
+            {
+              "patterns": [".*"],
+              "pulledWithin": "720h"
+            }
+          ]
+        }
+      ]
+    }
+  },
+
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000",
+    "realm": "zot",
+
+    "auth": {
+      "htpasswd": {
+        "path": "/etc/zot/htpasswd"
+      },
+      "failDelay": 3
+    },
+
+    "accessControl": {
+      "repositories": {
+        "apps/**": {
+          "policies": [
+            {
+              "users": ["ci"],
+              "actions": ["read", "create", "update", "delete"]
+            },
+            {
+              "users": ["deploy"],
+              "actions": ["read"]
+            }
+          ],
+          "defaultPolicy": [],
+          "anonymousPolicy": []
+        },
+        "docker/**": {
+          "policies": [
+            {
+              "users": ["ci", "deploy"],
+              "actions": ["read"]
+            }
+          ],
+          "defaultPolicy": [],
+          "anonymousPolicy": []
+        }
+      },
+      "adminPolicy": {
+        "users": ["admin"],
+        "actions": ["read", "create", "update", "delete"]
+      }
+    },
+
+    "compat": ["docker2s2"]
+  },
+
+  "log": {
+    "level": "info"
+  },
+
+  "scheduler": {
+    "numWorkers": 3
+  },
+
+  "extensions": {
+    "sync": {
+      "enable": true,
+      "registries": [
+        {
+          "urls": ["https://index.docker.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 5,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [
+            {
+              "prefix": "**",
+              "destination": "/docker",
+              "stripPrefix": true
+            }
+          ]
+        }
+      ]
+    },
+    "search": {
+      "enable": true
+    },
+    "ui": {
+      "enable": true
+    },
+    "scrub": {
+      "enable": true,
+      "interval": "24h"
+    }
+  }
+}

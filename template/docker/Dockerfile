@@ -1,5 +1,5 @@
 # 多阶段构建：打包与运行分离，最终镜像不含源码和构建工具
-# 前端项目示例，后端替换构建阶段即可（见 devops/README.md）
+# 前端项目示例，后端替换构建阶段即可
 
 # ---------- 构建阶段 ----------
 FROM node:20-alpine AS builder
@@ -11,6 +11,11 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+
+# 测试跑在构建阶段：不过则构建失败、镜像不产生、部署不发生。
+# 本方案不设独立 CI，理由与边界见 layout.md 第二节
+RUN npm test --if-present
+
 RUN npm run build
 
 # ---------- 运行阶段 ----------

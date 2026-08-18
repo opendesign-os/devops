@@ -1,0 +1,17 @@
+# deploy/env/*.env 是变量清单模板，只含 change-me 占位符，正常入库。
+# 以下规则防止填了真实值的配置被误提交。
+
+# 真实环境变量文件
+.env
+.env.*
+*.local.env
+
+# Zot 运行时产物：账号口令与镜像层，只应存在于机器 A
+registry/htpasswd
+registry/data/
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+*.swp
+*~
