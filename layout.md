@@ -145,7 +145,7 @@ registry.internal:5000/
 | `apps/**` | 保留最近推送的 10 个 | 最近 10 次部署可回滚，更早的镜像层被 GC |
 | `docker/**` | 保留 30 天内被拉取过的 | 长期不用的公共镜像自动清理，还在用的不会被误删 |
 
-要延长回滚窗口就调大 `mostRecentlyPushedCount`，代价是磁盘。改法见 [registry/README.md](registry/README.md) 第五节。
+要延长回滚窗口就调大 `mostRecentlyPushedCount`，代价是磁盘。改法见 [registry/README.md](registry/README.md) 第四节。
 
 ## 六、路径与地址的单一事实来源
 

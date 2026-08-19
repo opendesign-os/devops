@@ -4,10 +4,11 @@
 
 | 文档 | 内容 |
 |---|---|
-| 本文 | 两台机器的部署操作步骤 |
+| 本文 | 全部部署操作步骤，从零到跑起来，唯一来源 |
 | [layout.md](layout.md) | 代码、部署文件、变量、镜像、CI/CD 五类资产的存放规范 |
-| [registry/README.md](registry/README.md) | Zot 镜像仓库的安装、授权与运维 |
+| [registry/README.md](registry/README.md) | Zot 的配置项、授权、保留策略与运维，不含安装步骤 |
 | [apps/plane.md](apps/plane.md) | Plane 的变量配置与初始化 |
+| [docs/代理.md](docs/代理.md) | 借本机 Clash 给服务器临时开代理，及其删除 |
 
 | 目录 | 对应 |
 |---|---|
@@ -17,55 +18,205 @@
 
 ## 一、前提
 
+**系统 Alibaba Cloud Linux 3**（RHEL 系，内核 5.10）。命令按它写：包管理用 `dnf`，入站靠阿里云安全组。换 Ubuntu/Debian 需把 `dnf` 换成 `apt`、`httpd-tools` 换成 `apache2-utils`。
+
 | | 机器 A | 机器 B |
 |---|---|---|
 | 配置 | 4 核 / 8 GB / 120 GB | 4 核 / 8 GB / 200 GB |
 | 隧道地址 | `10.8.0.1`（`registry.internal`） | `10.8.0.2` |
-| 对公网 | 80、22、UDP 51820 | 80 |
 | 域名 | `ci.example.com` | 各应用域名 |
 
-- Docker Engine ≥ 20.10、Compose v2
 - Zot v2.1.20，**必须用 full 版镜像**（`zot-linux-amd64`），minimal 版不含扩展
 - Gitee 只用 WebHooks 与部署公钥，**不使用 Gitee Go**
 - 全程 **不勾选 Let's Encrypt**；Dokploy 面板与 Zot UI 都只经 SSH 隧道访问
 
-## 二、执行顺序
+### 需要替换的值
 
-两台机器不能各自独立走完，中间有三处必须交叉：
+命令与配置里凡是 `<尖括号>` 的都要换成你的实际值，开始前先备齐：
 
-| 阶段 | 在哪操作 | 做什么 |
+| 占位符 | 从哪来 |
+|---|---|
+| `<机器A公网IP>` | 阿里云控制台，机器 A 的公网 IP |
+| `<机器B公网IP>` | 阿里云控制台，机器 B 的公网 IP |
+| `<SSH用户>` | 登录服务器的账号，如 `root` |
+| `<机器A私钥>` `<机器A公钥>` | 第二节第 3 步在机器 A 上生成 |
+| `<机器B私钥>` `<机器B公钥>` | 第二节第 3 步在机器 B 上生成 |
+| `ci.example.com` | 换成你给机器 A 准备的真实域名 |
+| `plane.example.com` | 换成各应用的真实域名 |
+
+**下面这些是固定值，不要改成公网 IP：**
+
+| 固定值 | 含义 |
+|---|---|
+| `10.8.0.1` | **机器 A** 的隧道地址，`registry.internal` 指向它 |
+| `10.8.0.2` | **机器 B** 的隧道地址 |
+| `registry.internal` | 隧道内的主机名，解析到 `10.8.0.1` |
+| `51820` / `5000` / `3000` | WireGuard / Zot / Dokploy 的端口 |
+
+### 安全组
+
+入站由**安全组**决定，控制台里没放行的端口，系统内开了也没用。阿里云官方镜像的 firewalld 默认不启用，若你启用了要同步放行 80 与 51820。
+
+| 端口 | 协议 | 机器 A | 机器 B |
+|---|---|---|---|
+| 22 | TCP | 放行，限管理 IP | 放行，限管理 IP |
+| 80 | TCP | 放行 | 放行 |
+| 51820 | **UDP** | 放行，授权对象 `<机器B公网IP>/32` | 不放行 |
+| 3000、5000 | TCP | **不放行** | 不放行 |
+
+机器 B 不需要 51820 入方向规则 —— 它是主动发起的一方，回包走已建立的会话，安全组默认放行。
+
+各条规则的描述文案，填在阿里云的「描述」字段里便于日后回看：
+
+| 机器 | 规则 | 描述 |
 |---|---|---|
-| 1 | A 和 B **同时** | A1~A3、B1~B3：装 Docker、装 WireGuard 并生成密钥 |
-| 2 | 人工 | 交换两台机器的 `/etc/wireguard/publickey` 内容 |
-| 3 | A 和 B **同时** | A4~A7、B4~B7：写 wg0.conf、起隧道、配 hosts 与 daemon.json |
-| 4 | A | A8~A17：装 Dokploy、部署 Zot、配 Registry 与 Git |
-| 5 | B | B8~B9：登录仓库、建目录、建 SSH 部署用户 |
-| 6 | **A** | B10：在 Dokploy 里 Setup Server，远程给机器 B 装 Docker 与 Traefik |
-| 7 | B | B11：DNS 解析与放行 80 |
+| A | 22/TCP | `SSH 管理入口，限办公网 IP` |
+| A | 80/TCP | `Gitee webhook 入口（Dokploy）` |
+| A | 51820/UDP | `WireGuard 隧道入口，仅机器B接入，用于拉取 Zot 私有镜像` |
+| B | 22/TCP | `SSH 管理入口，限办公网 IP` |
+| B | 80/TCP | `应用域名入口（Traefik）` |
 
-第 2 步不做，第 3 步的 wg0.conf 填不出对端公钥。第 6 步是在机器 A 的面板里操作，但效果作用在机器 B。
+添加 51820 那条时两处容易错：协议类型要选**自定义 UDP**（默认是 TCP，选错则握手永远不成功）；授权对象必须带 `/32` 掩码，只填 IP 不被接受。
 
-## 三、机器 A
+3000 是 Dokploy 面板、5000 是 Zot，都只经 SSH 隧道访问。Zot 容器还额外只绑定隧道地址 `10.8.0.1`，公网网卡上没有监听。
 
-**A1** 挂 4 GB swap 并持久化
+### 章节顺序
+
+从上到下按序执行，本文是唯一的操作步骤来源。
+
+| 顺序 | 章节 | 在哪操作 |
+|---|---|---|
+| 1 | [二、准备](#二准备) | 两台机器都做，可并行 |
+| 2 | [三、建隧道](#三建隧道) | 先 A 后 B |
+| 3 | [四、机器 A：Dokploy](#四机器-adokploy) | 只在 A |
+| 4 | [五、机器 A：Zot 镜像仓库](#五机器-azot-镜像仓库) | 只在 A |
+| 5 | [六、机器 B：接入](#六机器-b接入) | 只在 B，末尾要回 A 点一次 |
+| 6 | [七、新项目接入](#七新项目接入) | Dokploy 面板 + Gitee |
+
+### 命令的读法
+
+每个代码块是**一次完整粘贴的单位**，不要按行拆开。带 `<<'EOF'` 的块从首行一直到单独的 `EOF` 才算一条命令 —— 只粘中间的 JSON 或配置正文，shell 会把 `{` 当成命令组、把 `"key":` 当成命令名，报一串 `command not found`，而文件根本没写成。
+
+命令里的 `<尖括号>` 要先换成上表的实际值再执行。
+
+## 二、准备
+
+**两台机器都要做，内容完全一样，可以并行。**
+
+### 1 · 挂 4 GB swap
 
 ```bash
 sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-**A2** 装 Docker 与 Compose v2
+报 `Text file busy` 说明已经挂过了，`swapon --show` 确认后跳过。此时 `&&` 已中断，`/etc/fstab` 不会重复追加。
+
+### 2 · 装 Docker
+
+`get.docker.com` 不认 `alinux`，改用 CentOS 源。`$releasever` 那步 sed 不能省 —— alinux 的值是 3，docker-ce 源没有 3 的目录。
 
 ```bash
-curl -fsSL https://get.docker.com | sh
+sudo dnf install -y dnf-utils && sudo dnf config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo && sudo sed -i 's/$releasever/8/g' /etc/yum.repos.d/docker-ce.repo && sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && sudo systemctl enable --now docker
 ```
 
-**A3** 装 WireGuard 并生成密钥对
+报 `containerd.io` 与自带 `runc` 冲突时，末尾加 `--allowerasing`。
+
+### 3 · 装 WireGuard 并生成密钥
+
+alinux 官方源里没有任何 wireguard 包，必须挂 EPEL。`epel-release` 是 CentOS 的包名，这里装不了，直接写源文件；版本写死 8，同样因为 `$releasever` 是 3。内核 5.10 已内置 wg 模块，只装 tools。
 
 ```bash
-sudo apt install -y wireguard && umask 077 && wg genkey | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey
+sudo tee /etc/yum.repos.d/epel.repo > /dev/null <<'EOF'
+[epel]
+name=EPEL for Alibaba Cloud Linux 3
+baseurl=https://mirrors.aliyun.com/epel/8/Everything/$basearch
+enabled=1
+gpgcheck=1
+gpgkey=https://mirrors.aliyun.com/epel/RPM-GPG-KEY-EPEL-8
+EOF
+sudo dnf install -y wireguard-tools && umask 077 && wg genkey | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey
 ```
 
-**A4** 写 `wg0.conf`，先把两处尖括号替换成实际值
+末尾打印的是**公钥**；私钥已写入 `/etc/wireguard/privatekey`，它在管道里被 `wg pubkey` 消费掉了所以不显示，属正常。
+
+### 4 · 配主机名
+
+```bash
+grep -q registry.internal /etc/hosts || echo '10.8.0.1 registry.internal' | sudo tee -a /etc/hosts
+```
+
+`grep -q` 打头是为了可重复执行 —— 直接 `tee -a` 跑第二次会追加出重复行。
+
+验证，输出必须是 `1`：
+
+```bash
+grep -c registry.internal /etc/hosts
+```
+
+已经重复了的话，先清干净再重跑上面那条：
+
+```bash
+sudo sed -i '/registry.internal/d' /etc/hosts
+```
+
+### 5 · 配 daemon.json 并重启 Docker
+
+这个文件配三件事：`insecure-registries` 允许对 `registry.internal:5000` 走 HTTP 且不校验证书，豁免仅限这一个地址；`log-driver` 与 `log-opts` 给容器日志加轮转，单文件上限 50 MB、保留 3 个，即每个容器的日志最多占 150 MB —— 不配的话 json-file 默认不轮转，长跑的容器迟早把磁盘写满。
+
+先看文件是不是空的。**有内容就别照下面覆盖** —— 要把已有配置与 `insecure-registries` 合并后再写，直接覆盖会丢掉别的组件（如 Dokploy）写进去的设置：
+
+```bash
+cat /etc/docker/daemon.json 2>/dev/null || echo '文件不存在，可直接执行下一条'
+```
+
+下面**整段一次粘贴**，从 `sudo tee` 到 `EOF` 是一条命令，只粘中间的 JSON 会报 `command not found`：
+
+```bash
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "insecure-registries": ["registry.internal:5000"],
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "50m", "max-file": "3" }
+}
+EOF
+```
+
+确认写成了再重启：
+
+```bash
+cat /etc/docker/daemon.json && sudo systemctl restart docker
+```
+
+**若已经装过 Dokploy**（顺序颠倒了），这次重启会把 Dokploy 的容器一并重启，等半分钟面板恢复，数据不受影响。
+
+### 6 · 取出密钥
+
+两台机器都执行，把值记下来。
+
+```bash
+sudo cat /etc/wireguard/privatekey; sudo cat /etc/wireguard/publickey
+```
+
+| 密钥 | 填到哪 |
+|---|---|
+| 私钥 | **本机** wg0.conf 的 `[Interface] PrivateKey`，不出本机 |
+| 公钥 | **对端** wg0.conf 的 `[Peer] PublicKey` |
+
+**密钥一旦重新生成，对端的配置也必须同步更新** —— 重复执行第 3 步会覆盖旧密钥，对端还填着旧公钥的话，包会被静默丢弃，表现为 ping 不通但没有任何报错。
+
+验证本机这对是否配套，下面这条的输出必须与上面的公钥一致：
+
+```bash
+sudo cat /etc/wireguard/privatekey | wg pubkey
+```
+
+> **两台机器都做完这 6 步再往下。** 建隧道要用对方的公钥，缺一台就没法填。
+
+## 三、建隧道
+
+### 机器 A
+
+写 `wg0.conf`，`PublicKey` 填**机器 B** 的公钥。
 
 ```bash
 sudo tee /etc/wireguard/wg0.conf > /dev/null <<'EOF'
@@ -78,98 +229,14 @@ PrivateKey = <机器A私钥>
 PublicKey = <机器B公钥>
 AllowedIPs = 10.8.0.2/32
 EOF
+sudo systemctl enable --now wg-quick@wg0
 ```
 
-**A5** 起隧道并放行隧道端口
+机器 A 必须先起，机器 B 才有对端可连。安全组放行 UDP 51820 也要提前做好，见第一节。
 
-```bash
-sudo systemctl enable --now wg-quick@wg0 && sudo ufw allow from <机器B公网IP> to any port 51820 proto udp
-```
+### 机器 B
 
-**A6** 配主机名
-
-```bash
-echo '10.8.0.1 registry.internal' | sudo tee -a /etc/hosts
-```
-
-**A7** 配 `daemon.json` 并重启 Docker
-
-```bash
-sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
-{
-  "insecure-registries": ["registry.internal:5000"],
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "50m", "max-file": "3" }
-}
-EOF
-sudo systemctl restart docker
-```
-
-**A8** 装 Dokploy。本机若已有 Docker Swarm **不要**执行，脚本会强制重新初始化
-
-```bash
-curl -sSL https://dokploy.com/install.sh | sh
-```
-
-**A9** 从本地开 SSH 隧道，浏览器打开 `http://localhost:3000` 建管理员账号并开 2FA
-
-```bash
-ssh -L 3000:localhost:3000 user@<机器A公网IP>
-```
-
-**A10** 面板 Settings → Server → Domain 绑定 `ci.example.com`，不勾 Let's Encrypt
-
-**A11** 关闭 3000 的公网访问
-
-```bash
-sudo ufw deny 3000/tcp && sudo ufw allow 80/tcp
-```
-
-**A12** 部署 Zot，建 `admin` / `ci` / `deploy` 三个账号，步骤见 [registry/README.md](registry/README.md)
-
-**A13** 登录仓库（推送用）
-
-```bash
-docker login registry.internal:5000 -u ci
-```
-
-**A14** 面板 Settings → Registry → Add，URL 填 `registry.internal:5000`，用户名 `ci`，密码填 A12 设的口令
-
-**A15** 面板 Settings → Git → Custom Git，生成 SSH 密钥，把公钥加到 Gitee 各仓库的「管理 → 部署公钥」
-
-**A16** 建备份目录。不先建好，下一步的 cron 重定向会静默失败
-
-```bash
-sudo mkdir -p /srv/backup/dokploy /srv/backup/registry
-```
-
-**A17** 装 crontab。整段用单引号包住，`$(...)` 与 `\%` 才会原样写进去
-
-```bash
-(crontab -l 2>/dev/null; echo '0 4 * * 0 docker builder prune -f --filter until=168h && docker image prune -a -f --filter until=336h'; echo '0 2 * * * docker exec $(docker ps -qf name=dokploy-postgres) pg_dumpall -U dokploy | gzip > /srv/backup/dokploy/dokploy-$(date +\%F).sql.gz') | crontab -
-```
-
-## 四、机器 B
-
-**B1** 挂 4 GB swap 并持久化
-
-```bash
-sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
-
-**B2** 装 Docker 与 Compose v2
-
-```bash
-curl -fsSL https://get.docker.com | sh
-```
-
-**B3** 装 WireGuard 并生成密钥对
-
-```bash
-sudo apt install -y wireguard && umask 077 && wg genkey | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey
-```
-
-**B4** 写 `wg0.conf`，先把三处尖括号替换成实际值
+写 `wg0.conf`，`PublicKey` 填**机器 A** 的公钥，`Endpoint` 填 `<机器A公网IP>`。
 
 ```bash
 sudo tee /etc/wireguard/wg0.conf > /dev/null <<'EOF'
@@ -183,54 +250,210 @@ Endpoint = <机器A公网IP>:51820
 AllowedIPs = 10.8.0.1/32
 PersistentKeepalive = 25
 EOF
-```
-
-**B5** 起隧道并验证连通
-
-```bash
 sudo systemctl enable --now wg-quick@wg0 && ping -c 3 10.8.0.1
 ```
 
-**B6** 配主机名
+> **ping 不通就别往下走**，后面每一步都依赖这条隧道。
+
+两台机器都执行 `sudo wg show`，按下表对号入座：
+
+| 现象 | 原因 |
+|---|---|
+| 一台的 `peer:` 值 ≠ 对端的 `public key:` 值 | 公钥填错或对端重新生成过密钥 |
+| 有 `sent` 但 `0 B received` | 包发出去没回应 —— 安全组没放行 UDP 51820，或对端公钥不匹配被丢弃 |
+| 完全没有 `transfer` 行 | 从未收到过任何包 |
+| `latest handshake` 空白 | 握手从未成功 |
+
+安全组的协议必须选 **UDP**，选 TCP 无效。
+
+
+## 四、机器 A：Dokploy
+
+以下全部在机器 A 操作。
+
+### 1 · 装 Dokploy
+
+要求 80、443、3000 三个端口空闲；本机若已有 Docker Swarm **不要**执行，脚本会强制重新初始化。
 
 ```bash
-echo '10.8.0.1 registry.internal' | sudo tee -a /etc/hosts
+curl -sSL https://dokploy.com/install.sh | sh
 ```
 
-**B7** 配 `daemon.json` 并重启 Docker
+脚本只在检测不到 Docker 时才去调 `get.docker.com`，准备阶段已经装好，所以不会踩 `alinux` 不被识别的坑 —— 顺序反过来就会失败。
+
+### 2 · 建管理员账号
+
+从本地开 SSH 隧道，浏览器打开 `http://localhost:3000` 创建管理员账号并开 2FA。
 
 ```bash
-sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
-{
-  "insecure-registries": ["registry.internal:5000"],
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "50m", "max-file": "3" }
-}
-EOF
-sudo systemctl restart docker
+ssh -L 3000:localhost:3000 <SSH用户>@<机器A公网IP>
 ```
 
-**B8** 登录仓库（拉取用，经隧道）
+### 3 · 绑定域名
+
+面板 Settings → Server → Domain 填 `ci.example.com`，不勾 Let's Encrypt。
+
+### 4 · 面板配 Git
+
+Settings → Git → Custom Git，生成 SSH 密钥，把公钥加到 Gitee 各仓库的「管理 → 部署公钥」。
+
+### 5 · 建备份目录
+
+不先建好，下一步的 cron 重定向会静默失败。
+
+```bash
+sudo mkdir -p /srv/backup/dokploy /srv/backup/registry
+```
+
+### 6 · 装 crontab
+
+整段用单引号包住，`$(...)` 与 `\%` 才会原样写进去。
+
+```bash
+(crontab -l 2>/dev/null; echo '0 4 * * 0 docker builder prune -f --filter until=168h && docker image prune -a -f --filter until=336h'; echo '0 2 * * * docker exec $(docker ps -qf name=dokploy-postgres) pg_dumpall -U dokploy | gzip > /srv/backup/dokploy/dokploy-$(date +\%F).sql.gz') | crontab -
+```
+
+重复执行会追加重复条目。装完核对一遍，应当只有这两行：
+
+```bash
+crontab -l
+```
+
+## 五、机器 A：Zot 镜像仓库
+
+仍在机器 A 操作。主机名与 `insecure-registries` 已在第二节配好，这里不重复。
+
+容器**只绑定 `10.8.0.1:5000`**，端口从一开始就没监听在公网网卡上，比"先开放再用防火墙堵"更难出事。代价是 wg0 必须先于容器起来，否则绑不到地址会反复重启。
+
+配置项含义、账号权限矩阵、保留策略调参与运维命令见 [registry/README.md](registry/README.md)。
+
+### 1 · 建目录
+
+```bash
+sudo mkdir -p /srv/registry/data && sudo chmod 755 /srv/registry
+```
+
+容器以 root 运行，数据目录不需要额外 chown。
+
+### 2 · 生成三个账号
+
+Zot 只认 **bcrypt**，`-B` 不能省。
+
+```bash
+sudo dnf install -y httpd-tools
+```
+
+```bash
+htpasswd -Bn admin | sudo tee /srv/registry/htpasswd
+```
+
+```bash
+htpasswd -Bn ci | sudo tee -a /srv/registry/htpasswd
+```
+
+```bash
+htpasswd -Bn deploy | sudo tee -a /srv/registry/htpasswd
+```
+
+`-Bn` 会交互式提示输入密码，不留 shell 历史。第一条用 `tee` 覆盖建文件，后两条用 `tee -a` 追加，别写反。
+
+三个账号都生成了的话，文件正好三行：
+
+```bash
+sudo wc -l < /srv/registry/htpasswd
+```
+
+`ci` 在机器 A 推送、`deploy` 在机器 B 拉取、`admin` 只用于登录 UI，权限矩阵见 [registry/README.md](registry/README.md) 第二节。
+
+**备选**（宿主机装不了 `httpd-tools` 时才用）：借容器里的 `htpasswd` 生成。`-b` 会把密码明文留在 shell 历史里，事后要 `history -c`；且此时 Zot 未启动，拉这个镜像只能直连 Docker Hub：
+
+```bash
+docker run --rm httpd:2.4-alpine htpasswd -bBn ci '<密码>' | sudo tee -a /srv/registry/htpasswd
+```
+
+### 3 · 放配置与编排
+
+把本仓库 `registry/` 下的 [config.json](registry/config.json) 与 [compose.yaml](registry/compose.yaml) 传到机器 A，在其所在目录执行：
+
+```bash
+sudo cp config.json compose.yaml /srv/registry/
+```
+
+默认值可直接用，三个账号的授权、两条保留策略与 Docker Hub 代理缓存都已写好。
+
+### 4 · 启动
+
+```bash
+cd /srv/registry && sudo docker compose up -d
+```
+
+首次拉取 zot 镜像约 100 MB，秒级启动。起不来先 `sudo wg show` 确认隧道。
+
+### 5 · 验证
+
+未认证访问应返回 `401`，说明服务活着且鉴权生效：
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://registry.internal:5000/v2/
+```
+
+从任意外部机器验证公网不可达，应超时或被拒绝：
+
+```bash
+curl -m 5 http://<机器A公网IP>:5000/v2/
+```
+
+### 6 · 登录仓库（推送用）
+
+```bash
+docker login registry.internal:5000 -u ci
+```
+
+### 7 · 面板配 Registry
+
+Settings → Registry → Add，URL 填 `registry.internal:5000`，用户名 `ci`，密码填第 2 步设的口令。
+
+## 六、机器 B：接入
+
+> **先确认第五节已完成** —— Zot 没起来，下面第 1 步会连不上。
+
+### 1 · 登录仓库（拉取用）
+
+走隧道，不经公网。
 
 ```bash
 docker login registry.internal:5000 -u deploy
 ```
 
-**B9** 建业务数据与备份目录
+### 2 · 验证代理缓存
+
+拉一个公共镜像，走 `docker/` 前缀。第一次会回源 Docker Hub（慢），第二次直接命中本地。
+
+```bash
+docker pull registry.internal:5000/docker/library/alpine:3.20
+```
+
+### 3 · 建业务数据与备份目录
 
 ```bash
 sudo mkdir -p /srv/appdata /srv/backup
 ```
 
-**B10** 建 SSH 部署用户，放好机器 A 的公钥，确认 sudo 免密可用。然后**回到机器 A 的面板** Settings → Servers → Create Server，填机器 B 公网 IP、SSH 端口、用户名与私钥，保存后点 **Setup Server**
+### 4 · 建 SSH 部署用户
 
-**B11** 各应用域名 DNS 解析到机器 B 公网 IP，放行 80
+创建可 SSH 登录的用户，放好机器 A 的公钥，确认 sudo 免密可用。下一步 Dokploy 要用它远程下发命令。
 
-```bash
-sudo ufw allow 80/tcp
-```
+### 5 · 回机器 A 点 Setup Server
 
-## 五、新项目接入
+> **这一步在机器 A 的面板里操作，装的是机器 B。**
+
+Settings → Servers → Create Server，填 `<机器B公网IP>`、SSH 端口、`<SSH用户>` 与它的私钥，保存后点 **Setup Server**，Dokploy 会远程给机器 B 装 Docker 与 Traefik。
+
+### 6 · DNS 解析
+
+各应用域名解析到 `<机器B公网IP>`。80 端口在安全组里放行，见第一节。
+
+## 七、新项目接入
 
 **应用仓库**：把 `template/` 内容复制到仓库根，按语言改 `docker/Dockerfile`，推到 Gitee，在「管理 → 部署公钥」勾选 Dokploy 的公钥。
 
@@ -253,19 +476,38 @@ sudo ufw allow 80/tcp
 
 首次点 Deploy，之后 push 即自动触发。
 
-## 六、日常操作
+Plane 走 Compose 类型，它的变量必改项与初始化步骤见 [apps/plane.md](apps/plane.md)。
+
+## 八、日常操作
 
 | 操作 | 位置 |
 |---|---|
 | 部署 / 回滚 / 看日志 / 改变量 | Dokploy 服务页 |
 | 改编排 | 提交到部署仓库，重新部署时自动拉取 |
-| 开 Dokploy 面板 | `ssh -L 3000:localhost:3000 user@<机器A公网IP>` |
-| 开 Zot UI | `ssh -L 5000:10.8.0.1:5000 user@<机器A公网IP>` |
+| 开 Dokploy 面板 | `ssh -L 3000:localhost:3000 <SSH用户>@<机器A公网IP>` |
+| 开 Zot UI | `ssh -L 5000:10.8.0.1:5000 <SSH用户>@<机器A公网IP>`，此处不能写 localhost，Zot 只绑隧道地址 |
 | 查隧道 | `sudo wg show` |
 | 重连隧道 | `sudo systemctl restart wg-quick@wg0` |
 
-回滚深度由保留策略决定，默认每个镜像保留最近 10 次推送，见 [registry/README.md](registry/README.md) 第五节。
+Zot UI 用 `admin` 账号登录，浏览器开 `http://localhost:5000`。
 
-机器 B 的业务数据备份随应用而定，Plane 的见 [apps/plane.md](apps/plane.md) 第三节。
+回滚深度由保留策略决定，默认每个镜像保留最近 10 次推送，见 [registry/README.md](registry/README.md) 第四节。
+
+机器 B 的业务数据备份随应用而定，Plane 的见 [apps/plane.md](apps/plane.md) 第四节。
 
 **已知问题**：Dokploy 用私有 registry 时回滚不执行 `docker login`（[issue #3861](https://github.com/Dokploy/dokploy/issues/3861)）。机器 B 重装或凭据失效后，先手工 `docker login` 再回滚。
+
+## 九、附录：不建隧道，改用公网 HTTPS
+
+只有在无法建立隧道时才走这条路，仓库会暴露在公网扫描下，与第三、五节的隧道方案**互斥**。
+
+机器 A 上 80/443 已被 Dokploy 的 Traefik 占用，因此**不要让 Zot 自己签证书**，而是让 Traefik 反代它：
+
+1. `compose.yaml` 里端口改成 `"127.0.0.1:5000:5000"`，并接入 `dokploy-network`
+2. `registry.example.com` 解析到机器 A 公网 IP
+3. 在 Dokploy 里把该域名反代到 Zot 容器的 5000，勾选 Let's Encrypt。反代需放开请求体限制并延长超时，否则推大镜像会失败
+4. 两台机器的 `daemon.json` **删掉** `insecure-registries`
+5. 项目共享变量里 `REGISTRY` 改成 `registry.example.com`、`REGISTRY_CACHE` 改成 `registry.example.com/docker`（都去掉 `:5000`），两台机器重新 `docker login`
+6. 确认 `anonymousPolicy` 仍为空数组 —— 公网暴露下，匿名可读等于把镜像公开
+
+Zot 也支持在 `http.tls` 里直接配证书，但那样要自己解决续期，不如复用已有的 Traefik。

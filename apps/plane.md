@@ -1,6 +1,6 @@
 # Plane 配置与初始化（社区版 v1.4.1）
 
-Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，变量填在 Dokploy UI。通用的机器准备见 [../README.md](../README.md)，本文只写 Plane 特有部分。
+Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，变量填在 Dokploy UI。建服务、配域名、Deploy 的通用流程见 [../README.md](../README.md) 第七节，本文只写 Plane 特有的部分。
 
 | 项 | 位置 |
 |---|---|
@@ -19,13 +19,7 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 | 镜像来源 | 全部经 Zot 的 `docker/` 前缀拉取，onDemand 模式首次请求时自动回源，**不需要预先建项目或推送** |
 | 对外 | 不映射宿主机端口，由 Traefik 按域名路由到 `proxy` 容器 |
 
-## 二、部署步骤
-
-### 步骤 1：在 Dokploy 创建服务
-
-Create Service → **Compose**，Provider 选 Git 指向部署仓库，Compose 路径填 `projects/plane/compose.yaml`，Server 选**机器 B**。
-
-### 步骤 2：填环境变量
+## 二、变量配置
 
 在服务的 Environment 编辑器里粘贴 `env/plane.env` 的内容后逐项修改。Dokploy 会把它写成 `.env` 放在 compose 同目录，供 `${VAR}` 插值。
 
@@ -43,29 +37,25 @@ Create Service → **Compose**，Provider 选 Git 指向部署仓库，Compose �
 
 **数据库密码必须在首次部署前定好**，卷初始化后再改不生效。
 
-### 步骤 3：配域名
+## 三、初始化
 
-Domains → Add，Service Name 选 `proxy`，Container Port 填 `80`，域名填 `plane.example.com`，**不勾选 Let's Encrypt**。DNS 需已解析到机器 B 公网 IP。
-
-### 步骤 4：部署
-
-点 Deploy。首次要经代理缓存回源约 5 GB 镜像，`migrator` 迁移完成后 `api` 才启动，整体 3~10 分钟。在 Logs 里观察，`migrator` 退出码 0 属正常。
+按 [../README.md](../README.md) 第七节建好服务并填完变量后，点 Deploy。首次要经代理缓存回源约 5 GB 镜像，`migrator` 迁移完成后 `api` 才启动，整体 3~10 分钟。在 Logs 里观察，`migrator` 退出码 0 属正常。
 
 首次拉取会在短时间内向 Docker Hub 发起 13 个镜像的回源请求，可能触碰匿名拉取的速率限制。若某个镜像卡住，等几分钟重新 Deploy 即可，已缓存的部分不会重拉。
 
-### 步骤 5：创建实例管理员
+### 1 · 创建实例管理员
 
 浏览器打开 `http://plane.example.com/god-mode/`，在 "Let's secure your instance" 页设置管理员邮箱与密码。
 
-### 步骤 6：配置 SMTP
+### 2 · 配置 SMTP
 
 God Mode → Email 填写 SMTP 并发测试邮件。不配则邀请成员、找回密码、Magic Link 登录均不可用。
 
-### 步骤 7：创建工作区
+### 3 · 创建工作区
 
 访问 `http://plane.example.com/`，登录后创建 Workspace 和 Project，邀请成员。
 
-## 三、运维
+## 四、运维与备份
 
 日常操作走 Dokploy UI：Deploy 重新部署、Logs 看日志、Environment 改变量后重新部署。升级 Plane 只需把 Environment 里的 `APP_RELEASE` 改成新版本号再 Deploy。
 
