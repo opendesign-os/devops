@@ -3,7 +3,7 @@
 Zot 是 CNCF 的 OCI 原生镜像仓库，单进程单容器，常驻内存 100~200 MB。
 它在本方案里同时承担两件事：存自研镜像（`apps/`）、代理缓存公共镜像（`docker/`）。
 
-**安装步骤不在本文。** 建目录、生成账号、放配置、启动、验证、登录，全部在 [../README.md](../README.md) 第五节，按那里一路做下来即可。本文只讲配置项含义、授权规则、保留策略调参与日常运维。
+**安装步骤不在本文。** 建目录、生成账号、启动、验证、登录，全部在 [../README.md](../README.md) 第五节，按那里一路做下来即可 —— 那一节以本仓库已克隆到机器 A 的 `/srv/devops` 为前提，克隆见其第二节第 1 步。本文只讲配置项含义、授权规则、保留策略调参与日常运维。
 
 ## 一、环境与设计取舍
 
@@ -15,6 +15,8 @@ Zot 是 CNCF 的 OCI 原生镜像仓库，单进程单容器，常驻内存 100~
 | 磁盘 | `/srv/registry/data` 预留 60 GB |
 | 主机名 | `registry.internal` → 机器 A 隧道地址 `10.8.0.1` |
 | 端口 | 5000，只绑定在隧道地址上 |
+| 配置与启动目录 | 机器 A 的检出 `/srv/devops/registry`，容器就地读这里的 `config.json` |
+| 运行时状态 | `/srv/registry/` 下的 `htpasswd` 与 `data/`，不进版本控制 |
 
 必须用 **full 版镜像**（`zot-linux-amd64`）。名字带 `minimal` 的那个不含任何扩展，代理缓存、UI、保留策略全都没有。
 
@@ -26,7 +28,7 @@ Zot 是 CNCF 的 OCI 原生镜像仓库，单进程单容器，常驻内存 100~
 
 ## 二、账号与授权
 
-授权规则写在 `config.json` 的 `http.accessControl` 里，改完重启容器生效。
+授权规则写在 `config.json` 的 `http.accessControl` 里。权威副本是本仓库的 [config.json](config.json)，改动按这条链走：改仓库 → push → 机器 A `sudo git -C /srv/devops pull` → 重启容器生效，命令见第六节。
 
 | 账号 | `apps/**` | `docker/**` | 登录位置 |
 |---|---|---|---|
@@ -80,11 +82,13 @@ Zot 的全部状态就是文件系统，没有数据库，备份即目录同步�
 rsync -a --delete /srv/registry/data/ /srv/backup/registry/
 ```
 
-配置与账号（含 bcrypt 口令，单独加密留存）：
+账号口令（bcrypt，单独加密留存）：
 
 ```bash
-sudo tar czf /srv/backup/registry-conf-$(date +%F).tar.gz -C /srv/registry config.json htpasswd compose.yaml
+sudo tar czf /srv/backup/registry-conf-$(date +%F).tar.gz -C /srv/registry htpasswd
 ```
+
+只备 `htpasswd` 就够：`config.json` 与 `compose.yaml` 在本仓库里，`git pull` 随时取回；`htpasswd` 是现场生成的，丢了两台机器都得重新 `docker login`。
 
 `data/docker/` 是代理缓存，丢了会自动回源，磁盘紧张时可以从备份里排除：
 
@@ -96,14 +100,14 @@ rsync -a --delete --exclude 'docker/' /srv/registry/data/ /srv/backup/registry/
 
 ## 六、运维命令与故障
 
-均在 `/srv/registry` 下执行。
+`docker compose` 相关命令都在检出目录 `/srv/devops/registry` 下执行 —— compose 认的是当前目录里的 `compose.yaml`。curl 与 du 在哪个目录都行。
 
 | 操作 | 命令 |
 |---|---|
 | 查看状态 | `sudo docker compose ps` |
 | 启动 / 停止 | `sudo docker compose up -d` / `sudo docker compose down` |
 | 查看日志 | `sudo docker logs -f zot` |
-| 改完 config.json 后生效 | `sudo docker compose restart` |
+| 改完 config.json 后生效 | 先把改动 push 回仓库，再 `sudo git -C /srv/devops pull && sudo docker compose restart` |
 | 存活检查 | `curl -s -o /dev/null -w '%{http_code}\n' http://registry.internal:5000/v2/`，期望 `401` |
 | 磁盘占用 | `sudo du -sh /srv/registry/data/*` |
 | 列出仓库 | `curl -s -u ci http://registry.internal:5000/v2/_catalog` |
@@ -112,7 +116,7 @@ rsync -a --delete --exclude 'docker/' /srv/registry/data/ /srv/backup/registry/
 
 容器镜像基于 scratch，**里面没有 shell**，`docker exec` 进不去，也写不了 shell 形式的 healthcheck。所有检查都在宿主机用 curl 做。
 
-升级：改 `compose.yaml` 里的 `ZOT_VERSION` 或镜像 tag，然后 `docker compose up -d`。Zot 的存储布局是 OCI 标准，小版本升级不需要迁移工具；跨大版本前先备份 `data/` 与 config。
+升级：改仓库里 `registry/compose.yaml` 的 `ZOT_VERSION` 或镜像 tag，push 后在机器 A `git pull`，再 `docker compose up -d`。Zot 的存储布局是 OCI 标准，小版本升级不需要迁移工具；跨大版本前先备份 `data/` 与 config。
 
 ### 常见故障
 
@@ -123,4 +127,3 @@ rsync -a --delete --exclude 'docker/' /srv/registry/data/ /srv/backup/registry/
 | `docker pull` 公共镜像超时 | Docker Hub 匿名拉取有速率限制，短时间大量回源会被限；等待或给 sync 配上游账号 |
 | 推送成功但 UI 看不到 | `search` 扩展被关掉了，UI 依赖它建索引 |
 | 客户端报 manifest 格式不支持 | `http.compat` 里的 `docker2s2` 被删了，老 Docker 客户端需要它 |
-

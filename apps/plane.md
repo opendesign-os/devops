@@ -2,10 +2,12 @@
 
 Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，变量填在 Dokploy UI。建服务、配域名、Deploy 的通用流程见 [../README.md](../README.md) 第七节，本文只写 Plane 特有的部分。
 
+本文引用的文件路径都以本仓库已克隆在服务器 `/srv/devops` 为前提，克隆步骤见 [../README.md](../README.md) 第二节第 1 步。
+
 | 项 | 位置 |
 |---|---|
-| 编排文件 | 部署仓库 `projects/plane/compose.yaml` |
-| 变量清单 | [../deploy/env/plane.env](../deploy/env/plane.env)，实际填在 Dokploy 服务的 Environment |
+| 编排文件 | 部署仓库 `projects/plane/compose.yaml`，骨架是本仓库 [../deploy/projects/plane/compose.yaml](../deploy/projects/plane/compose.yaml)（服务器上 `/srv/devops/deploy/projects/plane/compose.yaml`） |
+| 变量清单 | [../deploy/env/plane.env](../deploy/env/plane.env)（服务器上 `/srv/devops/deploy/env/plane.env`），实际填在 Dokploy 服务的 Environment |
 | 运行机器 | 机器 B |
 | 数据存放 | docker 命名卷（第三方栈不用 bind mount，原因见 [../layout.md](../layout.md) 第四节） |
 | 域名 | 在 Dokploy 的 Domains 里指向 `proxy` 服务的 80 端口 |
@@ -21,7 +23,7 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 
 ## 二、变量配置
 
-在服务的 Environment 编辑器里粘贴 `env/plane.env` 的内容后逐项修改。Dokploy 会把它写成 `.env` 放在 compose 同目录，供 `${VAR}` 插值。
+在服务的 Environment 编辑器里粘贴 `deploy/env/plane.env` 的内容后逐项修改，原文在服务器上直接取：`cat /srv/devops/deploy/env/plane.env`。Dokploy 会把它写成 `.env` 放在 compose 同目录，供 `${VAR}` 插值。
 
 必改项：
 

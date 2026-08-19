@@ -3,7 +3,9 @@
 # 为什么不交给 Dokploy 管：Dokploy 部署任何服务都要先能拉镜像，
 # 镜像仓库反过来由 Dokploy 部署会形成循环依赖，重装时无法自举。
 #
-# 落盘位置：本文件与 config.json、htpasswd 都放机器 A 的 /srv/registry/
+# 启动位置：机器 A 的 /srv/devops/registry，也就是本仓库的检出目录。
+# 本文件与 config.json 由容器就地读取，不复制到别处；
+# 运行时状态（htpasswd 与镜像层）在 /srv/registry/，不进版本控制
 
 services:
   zot:
@@ -19,7 +21,7 @@ services:
 
     volumes:
       - ./config.json:/etc/zot/config.json:ro
-      - ./htpasswd:/etc/zot/htpasswd:ro
+      - /srv/registry/htpasswd:/etc/zot/htpasswd:ro
       - /srv/registry/data:/var/lib/registry
 
     logging:
@@ -29,4 +31,4 @@ services:
         max-file: "3"
 
     # 镜像基于 scratch，容器内没有 shell 与 wget/curl，
-    # 无法写 healthcheck。存活检查在宿主机执行，见 README 第七节
+    # 无法写 healthcheck。存活检查在宿主机执行，见同目录 README.md 第六节

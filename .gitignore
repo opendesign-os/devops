@@ -6,7 +6,7 @@
 .env.*
 *.local.env
 
-# Zot 运行时产物：账号口令与镜像层，只应存在于机器 A
+# Zot 的运行时状态只在机器 A 的 /srv/registry/，出现在检出里就是误操作，这两条兜底
 registry/htpasswd
 registry/data/
 
