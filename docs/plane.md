@@ -2,7 +2,7 @@
 
 Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，变量填在 Dokploy UI。建服务、配域名、Deploy 的通用流程见 [deploy.md](deploy.md) 第七节，本文只写 Plane 特有的部分。
 
-本文引用的文件路径都以本仓库已克隆在服务器 `/srv/devops` 为前提，克隆步骤见 [deploy.md](deploy.md) 第二节第 1 步。
+本文引用的文件路径以本仓库已克隆在机器 A 的 `/srv/devops` 为前提，克隆步骤见 [deploy.md](deploy.md) 第五节第 1 步。
 
 | 项 | 位置 |
 |---|---|

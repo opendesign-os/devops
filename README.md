@@ -51,11 +51,11 @@ flowchart LR
 
 ## 目录
 
-本仓库要克隆到两台服务器的 `/srv/devops`，它是手册与 Zot 配置在服务器上的唯一来源，克隆是 [docs/deploy.md](docs/deploy.md) 第二节第 1 步。
+本仓库要克隆到机器 A 的 `/srv/devops`：Zot 从 `registry/` 就地启动，手册也随之在机器上。机器 B 不需要检出，它的编排与 `.env` 由 Dokploy 经 SSH 下发。克隆是 [docs/deploy.md](docs/deploy.md) 第五节第 1 步。
 
 | 目录 | 服务器上怎么用 | 说明 |
 |---|---|---|
-| `docs/` | 直接读 | 全部文档，`less /srv/devops/docs/deploy.md` |
-| `registry/` | 机器 A 就地启动 Zot | `config.json` 与 `compose.yaml`，容器就地读，不复制到别处 |
+| `docs/` | 机器 A 上直接读 | 全部文档，`less /srv/devops/docs/deploy.md` |
+| `registry/` | 机器 A 就地启动 Zot | `config.json` 与 `compose.yaml`，容器就地读 |
 | `deploy/` | 只作对照，不参与部署 | 部署仓库骨架，真正参与部署的那份由 Dokploy 从 Gitee 检出 |
 | `template/` | 只作对照 | 应用仓库骨架，在本机复制到每个新项目 |

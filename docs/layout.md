@@ -1,6 +1,6 @@
 # 存放规范
 
-覆盖五类资产：**项目代码、部署文件、环境变量、镜像文件、CI/CD 定义**，外加本仓库在服务器上的检出、运行时才产生的业务数据与凭据。
+覆盖五类资产：**项目代码、部署文件、环境变量、镜像文件、CI/CD 定义**，外加本仓库在机器 A 上的检出、运行时才产生的业务数据与凭据。
 
 每一份都必须能回答三个问题：**权威副本在哪、丢了能不能重建、要不要备份**。本文是这三个问题的唯一答案，其余文档只引用不重复。
 
@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 项目代码 | Gitee 应用仓库 | `template/` | 机器 A 的 Dokploy 检出；机器 B 没有 |
 | 部署文件 | Gitee 部署仓库 | `deploy/projects/` | 机器 A 检出，再由 Dokploy 下发到服务的运行机器 |
-| 部署手册与骨架 | 本仓库（GitHub `opendesign-os/devops`） | 全部 | 两台机器的 `/srv/devops`；机器 A 的 Zot 直接在 `/srv/devops/registry` 下启动 |
+| 部署手册与骨架 | 本仓库（GitHub `opendesign-os/devops`） | 全部 | 机器 A 的 `/srv/devops`，Zot 就在 `/srv/devops/registry` 下启动 |
 | 环境变量 | 机器 A 的 Dokploy 数据库 | `deploy/env/`（清单，不是真值） | 运行机器上的 `.env`，由 Dokploy 写 |
 | 镜像文件 | 机器 A 的 Zot | 无，构建产物不入库 | `/srv/registry/data/` |
 | CI/CD 定义 | **本方案不产生此类文件**，见第二节 | 无 | 无 |
@@ -21,7 +21,7 @@
 
 仓库里只有三个骨架目录（`template/`、`deploy/`、`registry/`），其余四类都不进版本控制 —— 要么是构建产物，要么是运行时状态，要么是密钥。
 
-服务器上的 `/srv/devops` 就是本仓库的检出，克隆与更新见 [deploy.md](deploy.md) 第二节第 1 步。机器 A 的 Zot 就在 `/srv/devops/registry` 下启动、就地读检出里的配置；机器 B 只用它查手册。两台都不在检出里改文件 —— 改动一律回本仓库 push 再 pull。
+机器 A 的 `/srv/devops` 是本仓库的检出，Zot 就在 `/srv/devops/registry` 下启动、就地读里面的配置，克隆与更新见 [deploy.md](deploy.md) 第五节第 1 步。机器 B 没有检出，它的编排与 `.env` 由 Dokploy 经 SSH 下发。检出里的文件不手工改 —— 改动一律回本仓库 push 再 pull。
 
 服务落在哪台机器由 Dokploy 服务的 **Server** 字段决定，同一项目的服务可以分散在两台上；下面各节按当前分布写：自研应用在机器 B，Plane 在机器 A。
 
@@ -31,7 +31,7 @@
 |---|---|---|---|
 | 项目代码 | 机器 A 的检出 | 无，重新拉取 | 由 Gitee 负责 |
 | 部署文件 | 机器 A 检出、运行机器上的下发件 | 无，重新拉取 | 由 Gitee 负责 |
-| 部署手册与骨架 | 两台机器的 `/srv/devops` | 无，重新克隆 | 由 Git 远端负责 |
+| 部署手册与骨架 | 机器 A 的 `/srv/devops` | 无，重新克隆 | 由 Git 远端负责 |
 | **环境变量与服务定义** | 运行机器上的 `.env` | **不可重建**，等于丢掉全部部署配置 | 每日 |
 | 自研镜像 | 机器 B 本地镜像层 | 可重新构建，但历史版本没了就无法回滚 | 每周 |
 | 公共镜像缓存 | 无 | 无，下次拉取自动回源 | 不备份 |
@@ -106,7 +106,7 @@
 
 机器 A 上人工维护的只有 `/srv/registry/htpasswd`（现场生成，不入库）；`/srv/devops` 只用 `git pull` 更新；`/etc/dokploy/` 全部由 Dokploy 自己管。
 
-Plane 跑在机器 A，数据在 `/var/lib/docker/volumes/`，用命名卷而非 bind mount 的理由见第四节。
+Plane 跑在机器 A，数据在 `/var/lib/docker/volumes/` 的命名卷里，理由见第四节。
 
 ## 四、机器 B：运行平面
 
@@ -115,16 +115,15 @@ Plane 跑在机器 A，数据在 `/var/lib/docker/volumes/`，用命名卷而非
                                    # 改了会在下次部署时被覆盖
 
 /srv/
-├── devops/                        # 本仓库的检出，只用来查手册，不参与部署
 ├── appdata/<app>/                 # 自研应用的持久化数据，bind mount
 └── backup/                        # 数据库导出与卷打包
 
 /var/lib/docker/
 ├── overlay2/                      # 镜像层，可重拉
-└── volumes/                       # ★ 跑在 B 的第三方栈命名卷（当前为空，Plane 在机器 A）
+└── volumes/                       # ★ 跑在 B 的第三方栈命名卷
 ```
 
-机器 B 上**没有源码、没有编排文件、没有 CI 定义、没有 nginx、没有 certbot** —— `/srv/devops` 里的 `deploy/` 骨架不算，它是手册的一部分，不被任何部署读取。人工只碰 `/srv/`。
+机器 B 上**没有源码、没有编排文件、没有 CI 定义、没有 nginx、没有 certbot**，也没有本仓库的检出。人工只碰 `/srv/`。
 
 ### 业务数据为什么分两种放法
 
@@ -170,9 +169,9 @@ registry.internal:5000/
 
 ## 七、禁止事项
 
-- 机器 B 上手工放源码或编排文件 —— 下次部署会被 Dokploy 覆盖，且造成两处事实；`/srv/devops` 的检出不在此列，它不参与部署
+- 机器 B 上手工放源码或编排文件 —— 下次部署会被 Dokploy 覆盖，且造成两处事实
 - 手工修改 `/etc/dokploy/` 下的任何内容 —— 同上
-- 直接改服务器 `/srv/devops` 里的文件 —— 权威副本在本仓库，改动要走 push 再 pull，否则下次 `git pull` 冲突或被覆盖
+- 直接改机器 A 的 `/srv/devops` 里的文件 —— 权威副本在本仓库，改动要走 push 再 pull，否则下次 `git pull` 冲突或被覆盖
 - 让 CI 也构建推送镜像 —— 镜像产地必须唯一，见第二节
 - 把真实变量值提交进 `deploy/env/` —— 那里只放 `change-me` 占位清单，真值填在 Dokploy UI 里
 - 往 `docker/` 前缀推镜像 —— 该前缀由 sync 托管，手工推的东西会被保留策略当作缓存清掉

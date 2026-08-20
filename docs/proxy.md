@@ -2,7 +2,7 @@
 
 借本机 Clash 给服务器临时开代理。隧道随 FinalShell 会话存活，窗口关闭即失效。
 
-服务器上这份文档在 `/srv/devops/docs/proxy.md`。最需要它的时刻恰恰是检出还不存在的时候 —— 克隆 GitHub 被墙时照着本文在本地读着做，下面的命令都不依赖服务器上的检出。
+机器 A 上这份文档在 `/srv/devops/docs/proxy.md`。最需要它的时刻恰恰是检出还不存在的时候 —— 克隆 GitHub 被墙时照着本文在本地读着做，下面的命令都不依赖服务器上的检出。
 
 ## 一、建隧道
 
@@ -76,7 +76,7 @@ git config --global http.https://github.com/.proxy http://127.0.0.1:7898
 sudo git config --global http.https://github.com/.proxy http://127.0.0.1:7898
 ```
 
-然后重试克隆，完整步骤见 [deploy.md](deploy.md) 第二节第 1 步：
+然后重试克隆，完整步骤见 [deploy.md](deploy.md) 第五节第 1 步：
 
 ```bash
 sudo git clone https://github.com/opendesign-os/devops.git /srv/devops

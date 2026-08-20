@@ -4,7 +4,7 @@
 # 镜像仓库反过来由 Dokploy 部署会形成循环依赖，重装时无法自举。
 #
 # 启动位置：机器 A 的 /srv/devops/registry，也就是本仓库的检出目录。
-# 本文件与 config.json 由容器就地读取，不复制到别处；
+# 本文件与 config.json 由容器就地读取；
 # 运行时状态（htpasswd 与镜像层）在 /srv/registry/，不进版本控制
 
 services:
