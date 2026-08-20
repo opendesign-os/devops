@@ -34,7 +34,7 @@ flowchart LR
   plane -->|拉镜像| zot
   app -.->|"拉镜像 · WireGuard"| zot
   tfb --> app
-  user -->|":8080"| plane
+  user -->|":4141"| plane
   user -->|各应用域名| tfb
 ```
 

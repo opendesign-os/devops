@@ -188,7 +188,7 @@ services:
     image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-proxy:${APP_RELEASE}
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "4141:80"
     environment:
       <<: *proxy-env
     volumes:

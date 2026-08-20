@@ -29,7 +29,7 @@
 | `<机器A私钥>` `<机器A公钥>` | 第二节第 3 步在机器 A 上生成 |
 | `<机器B私钥>` `<机器B公钥>` | 第二节第 3 步在机器 B 上生成 |
 | `ci.example.com` | 换成你给机器 A 准备的真实域名 |
-| `plane.example.com` | 换成各应用的真实域名，Plane 当前用 `<机器A公网IP>:8080` |
+| `plane.example.com` | 换成各应用的真实域名，Plane 当前用 `<机器A公网IP>:4141` |
 
 **下面这些是固定值，不要改成公网 IP：**
 
@@ -49,7 +49,7 @@
 |---|---|---|---|---|
 | A | 22 | TCP | 限管理 IP | `SSH 管理入口，限办公网 IP` |
 | A | 80 | TCP | 全部 | `Gitee webhook 与跑在 A 的应用域名入口（Traefik）` |
-| A | 8080 | TCP | 全部 | `Plane 入口，映射到 proxy 容器的 80` |
+| A | 4141 | TCP | 全部 | `Plane 入口，映射到 proxy 容器的 80` |
 | A | 51820 | **UDP** | `<机器B公网IP>/32` | `WireGuard 隧道入口，仅机器B接入，用于拉取 Zot 私有镜像` |
 | B | 22 | TCP | 限管理 IP | `SSH 管理入口，限办公网 IP` |
 | B | 80 | TCP | 全部 | `应用域名入口（Traefik）` |
@@ -533,7 +533,7 @@ Plane 是 13 个容器的第三方栈，用 **Compose** 类型。
 3. 点 **+ Create Service** → **Compose**，Name 填 `plane`
 4. Provider 选 **Git**：Repository URL 填 `https://gitee.com/<组织>/plane.git`，Branch 填 `master`（Gitee 默认），Compose Path 改成 `./compose.yaml`（默认值 `./docker-compose.yml` 在仓库里不存在），Save。私有仓库要点 **Add SSH Key** 选一把密钥、把公钥加到该仓库的部署公钥，地址换成 `git@gitee.com:<组织>/plane.git`。这一页没有 Server 字段：Plane 跑机器 A，就是 Dokploy 本机，默认即可
 5. Environment 粘 [deploy/env/plane.env](../deploy/env/plane.env) 的全部内容，逐项改必改值（密钥、密码、域名），公共项保持 `${{project.REGISTRY_CACHE}}` 这样的引用（变量放在环境层时前缀改成 `${{environment.` ）；必改清单见 [plane.md](plane.md) 第二节。填完点 Provider 页的 **Preview Compose** 核对：镜像应渲染成 `registry.internal:5000/docker/makeplane/...`，出现 `docker.io/` 说明引用没替换成功 —— compose 写的是 `${REGISTRY_CACHE:-docker.io}`，取不到值会静默直连 Docker Hub
-6. 安全组放行机器 A 的 8080 —— compose 里 `proxy` 映射的是 `8080:80`，访问地址就是 `http://<机器A公网IP>:8080`，不经 Traefik，不用配 Domains
+6. 安全组放行机器 A 的 4141 —— compose 里 `proxy` 映射的是 `4141:80`，访问地址就是 `http://<机器A公网IP>:4141`，不经 Traefik，不用配 Domains。换端口时避开已占用的：80、443、8080 是 Traefik，3000 是 Dokploy 面板，5000 是 Zot，撞上会报 `port is already allocated`
 7. 点 **Deploy**，在 Logs 里看 13 个镜像回源与 `migrator` 迁移，首次 3~10 分钟
 8. 要 push 即部署就在 General 打开 Auto Deploy，把 Webhook URL 加到该仓库的 WebHooks，事件选 Push
 9. 起来后按 [plane.md](plane.md) 第三节建实例管理员、配 SMTP、建工作区
