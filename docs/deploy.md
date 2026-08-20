@@ -12,7 +12,7 @@
 |---|---|---|
 | 配置 | 4 核 / 8 GB / 120 GB | 4 核 / 8 GB / 200 GB |
 | 隧道地址 | `10.8.0.1`（`registry.internal`） | `10.8.0.2` |
-| 域名 | `ci.example.com` + 跑在 A 的应用域名（Plane） | 跑在 B 的应用域名 |
+| 域名 | `ci.example.com`（面板）；Plane 走 `IP:4141`，不占域名 | 跑在 B 的应用域名 |
 
 - 本仓库在 GitHub，克隆到机器 A；应用仓库与部署仓库在 Gitee，只用它的 WebHooks 与部署公钥，**不使用 Gitee Go**
 - 全程 **不勾选 Let's Encrypt**；Dokploy 面板与 Zot UI 都只经 SSH 隧道访问
@@ -29,7 +29,6 @@
 | `<机器A私钥>` `<机器A公钥>` | 第二节第 3 步在机器 A 上生成 |
 | `<机器B私钥>` `<机器B公钥>` | 第二节第 3 步在机器 B 上生成 |
 | `ci.example.com` | 换成你给机器 A 准备的真实域名 |
-| `plane.example.com` | 换成各应用的真实域名，Plane 当前用 `<机器A公网IP>:4141` |
 
 **下面这些是固定值，不要改成公网 IP：**
 
@@ -402,8 +401,10 @@ curl -m 5 http://<机器A公网IP>:5000/v2/
 ### 6 · 登录仓库（推送用）
 
 ```bash
-docker login registry.internal:5000 -u ci
+sudo docker login registry.internal:5000 -u ci
 ```
+
+`sudo` 不能省：Dokploy 以 root 执行 docker，凭据要落在 `/root/.docker/config.json`。写进普通用户的 `~/.docker/config.json` 时，构建推送与 compose 拉取都会报 `unauthorized` —— Zot 的 `anonymousPolicy` 是空数组，匿名无任何权限。
 
 ### 7 · 面板配 Registry
 
@@ -430,10 +431,10 @@ docker login registry.internal:5000 -u ci
 
 ### 1 · 登录仓库（拉取用）
 
-走隧道，不经公网。
+走隧道，不经公网。`sudo` 同样不能省，Dokploy 下发的部署命令以 root 执行。
 
 ```bash
-docker login registry.internal:5000 -u deploy
+sudo docker login registry.internal:5000 -u deploy
 ```
 
 ### 2 · 验证代理缓存
@@ -533,12 +534,14 @@ Plane 是 13 个容器的第三方栈，用 **Compose** 类型。
 3. 点 **+ Create Service** → **Compose**，Name 填 `plane`
 4. Provider 选 **Git**：Repository URL 填 `https://gitee.com/<组织>/plane.git`，Branch 填 `master`（Gitee 默认），Compose Path 改成 `./compose.yaml`（默认值 `./docker-compose.yml` 在仓库里不存在），Save。私有仓库要点 **Add SSH Key** 选一把密钥、把公钥加到该仓库的部署公钥，地址换成 `git@gitee.com:<组织>/plane.git`。这一页没有 Server 字段：Plane 跑机器 A，就是 Dokploy 本机，默认即可
 5. Environment 粘 [deploy/env/plane.env](../deploy/env/plane.env) 的全部内容，逐项改必改值（密钥、密码、域名），公共项保持 `${{project.REGISTRY_CACHE}}` 这样的引用（变量放在环境层时前缀改成 `${{environment.` ）；必改清单见 [plane.md](plane.md) 第二节。填完点 Provider 页的 **Preview Compose** 核对：镜像应渲染成 `registry.internal:5000/docker/makeplane/...`，出现 `docker.io/` 说明引用没替换成功 —— compose 写的是 `${REGISTRY_CACHE:-docker.io}`，取不到值会静默直连 Docker Hub
-6. 安全组放行机器 A 的 4141 —— compose 里 `proxy` 映射的是 `4141:80`，访问地址就是 `http://<机器A公网IP>:4141`，不经 Traefik，不用配 Domains。换端口时避开已占用的：80、443、8080 是 Traefik，3000 是 Dokploy 面板，5000 是 Zot，撞上会报 `port is already allocated`
+6. 安全组放行机器 A 的 4141 —— compose 里 `proxy` 映射的是 `4141:80`，访问地址就是 `http://<机器A公网IP>:4141`，不经 Traefik，不用配 Domains。换端口要避开 80、443、8080（Traefik）、3000（面板）、5000（Zot），撞上会报 `port is already allocated`
 7. 点 **Deploy**，在 Logs 里看 13 个镜像回源与 `migrator` 迁移，首次 3~10 分钟
 8. 要 push 即部署就在 General 打开 Auto Deploy，把 Webhook URL 加到该仓库的 WebHooks，事件选 Push
 9. 起来后按 [plane.md](plane.md) 第三节建实例管理员、配 SMTP、建工作区
 
 每个栈一个部署仓库，push 只触发它自己的服务。换别的第三方栈就在 Gitee 另建一个仓库、根目录同样放 `compose.yaml`，Server 换成它的运行机器；通用骨架见 [deploy/projects/example/compose.yaml](../deploy/projects/example/compose.yaml)，自研应用的卷写成 `${APPDATA_ROOT}/<app>/<子目录>`，原因见 [layout.md](layout.md) 第四节。
+
+Deploy 报 `Compose file not found` 时，先在机器 A 上看实际检出了什么：`sudo ls -la /etc/dokploy/compose/<服务名>/code`。空目录说明克隆失败：日志里 `could not read Username for 'https://gitee.com'` 是私有仓库走了 HTTPS，按第 4 步换成 SSH 地址；`Host key verification failed` 则在机器 A 上执行一次 `sudo ssh -T -o StrictHostKeyChecking=accept-new git@gitee.com`。有文件但没有编排文件，是 Compose Path 或 Branch 填错，也可能改动还没 push 到远端。
 
 ### 自研应用
 
@@ -572,7 +575,7 @@ Zot UI 用 `admin` 账号登录，浏览器开 `http://localhost:5000`。
 
 业务数据备份在应用实际运行的那台机器上做，Plane 的见 [plane.md](plane.md) 第四节。
 
-**已知问题**：Dokploy 用私有 registry 时回滚不执行 `docker login`（[issue #3861](https://github.com/Dokploy/dokploy/issues/3861)）。机器 B 重装或凭据失效后，先手工 `docker login` 再回滚。
+**已知问题**：Dokploy 用私有 registry 时回滚不执行 `docker login`（[issue #3861](https://github.com/Dokploy/dokploy/issues/3861)）。机器 B 重装或凭据失效后，先手工 `sudo docker login` 再回滚。
 
 ## 九、附录：不建隧道，改用公网 HTTPS
 
@@ -584,7 +587,7 @@ Zot UI 用 `admin` 账号登录，浏览器开 `http://localhost:5000`。
 2. `registry.example.com` 解析到机器 A 公网 IP
 3. 在 Dokploy 里把该域名反代到 Zot 容器的 5000，勾选 Let's Encrypt。反代需放开请求体限制并延长超时，否则推大镜像会失败
 4. 两台机器的 `daemon.json` **删掉** `insecure-registries`
-5. 项目共享变量里 `REGISTRY` 改成 `registry.example.com`、`REGISTRY_CACHE` 改成 `registry.example.com/docker`（都去掉 `:5000`），两台机器重新 `docker login`
+5. 项目共享变量里 `REGISTRY` 改成 `registry.example.com`、`REGISTRY_CACHE` 改成 `registry.example.com/docker`（都去掉 `:5000`），两台机器重新 `sudo docker login`
 6. 确认 `anonymousPolicy` 仍为空数组 —— 公网暴露下，匿名可读等于把镜像公开
 
 Zot 也支持在 `http.tls` 里直接配证书，但那样要自己解决续期，不如复用已有的 Traefik。

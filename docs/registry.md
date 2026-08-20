@@ -17,6 +17,7 @@ Zot 是 CNCF 的 OCI 原生镜像仓库，单进程单容器，常驻内存 100~
 | 端口 | 5000，只绑定在隧道地址上 |
 | 配置与启动目录 | 机器 A 的检出 `/srv/devops/registry`，容器就地读这里的 `config.json` |
 | 运行时状态 | `/srv/registry/` 下的 `htpasswd` 与 `data/`，不进版本控制 |
+| 回源上游 | `docker.m.daocloud.io` 优先、`index.docker.io` 兜底 —— 大陆机器直连 Docker Hub 基本不通 |
 
 必须用 **full 版镜像**（`zot-linux-amd64`）。名字带 `minimal` 的那个不含任何扩展，代理缓存、UI、保留策略全都没有。
 
@@ -126,6 +127,7 @@ rsync -a --delete --exclude 'docker/' /srv/registry/data/ /srv/backup/registry/
 |---|---|
 | 容器反复重启，日志报绑定地址失败 | wg0 没起来，`sudo systemctl restart wg-quick@wg0` 后再起容器 |
 | `docker push` 报 401 | 账号在 htpasswd 里但没在 `accessControl` 里，或策略漏了 `read` |
-| `docker pull` 公共镜像超时 | Docker Hub 匿名拉取有速率限制，短时间大量回源会被限；等待或给 sync 配上游账号 |
+| `docker pull` 公共镜像超时、`data/` 下不生成 `docker/` 目录 | 机器 A 到上游不通。典型现象：`getent hosts registry-1.docker.io` 返回 `2a03:2880::` 段的 Meta 地址（DNS 污染），IPv4 的 443 超时，而访问别的境外站点正常。换上游即可：`config.json` 的 `extensions.sync.registries[0].urls` 按顺序尝试，默认已把国内镜像 `https://docker.m.daocloud.io` 放在 `https://index.docker.io` 之前；有阿里云镜像加速器地址（控制台 → 容器镜像服务 → 镜像加速器）就换成它，同厂商内网更稳 |
+| `docker pull` 公共镜像被限速 | Docker Hub 匿名拉取有速率限制，短时间大量回源会被限；等待或给 sync 配上游账号 |
 | 推送成功但 UI 看不到 | `search` 扩展被关掉了，UI 依赖它建索引 |
 | 客户端报 manifest 格式不支持 | `http.compat` 里的 `docker2s2` 被删了，老 Docker 客户端需要它 |
