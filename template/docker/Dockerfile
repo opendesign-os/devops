@@ -13,7 +13,7 @@ RUN npm ci
 COPY . .
 
 # 测试跑在构建阶段：不过则构建失败、镜像不产生、部署不发生。
-# 本方案不设独立 CI，理由与边界见 layout.md 第二节
+# 本方案不设独立 CI，理由与边界见 docs/layout.md 第二节
 RUN npm test --if-present
 
 RUN npm run build

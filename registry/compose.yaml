@@ -31,4 +31,4 @@ services:
         max-file: "3"
 
     # 镜像基于 scratch，容器内没有 shell 与 wget/curl，
-    # 无法写 healthcheck。存活检查在宿主机执行，见同目录 README.md 第六节
+    # 无法写 healthcheck。存活检查在宿主机执行，见 docs/registry.md 第六节

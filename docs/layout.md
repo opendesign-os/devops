@@ -11,32 +11,34 @@
 | 资产 | 权威副本 | 本仓库骨架 | 服务器上的落点 |
 |---|---|---|---|
 | 项目代码 | Gitee 应用仓库 | `template/` | 机器 A 的 Dokploy 检出；机器 B 没有 |
-| 部署文件 | Gitee 部署仓库 | `deploy/projects/` | 机器 A 检出，再由 Dokploy 下发到机器 B |
+| 部署文件 | Gitee 部署仓库 | `deploy/projects/` | 机器 A 检出，再由 Dokploy 下发到服务的运行机器 |
 | 部署手册与骨架 | 本仓库（GitHub `opendesign-os/devops`） | 全部 | 两台机器的 `/srv/devops`；机器 A 的 Zot 直接在 `/srv/devops/registry` 下启动 |
-| 环境变量 | 机器 A 的 Dokploy 数据库 | `deploy/env/`（清单，不是真值） | 机器 B 的 `.env`，由 Dokploy 写 |
+| 环境变量 | 机器 A 的 Dokploy 数据库 | `deploy/env/`（清单，不是真值） | 运行机器上的 `.env`，由 Dokploy 写 |
 | 镜像文件 | 机器 A 的 Zot | 无，构建产物不入库 | `/srv/registry/data/` |
 | CI/CD 定义 | **本方案不产生此类文件**，见第二节 | 无 | 无 |
-| 业务数据 | 机器 B 的卷与 `/srv/appdata` | 无，运行时产生 | 机器 B |
+| 业务数据 | 服务所在机器的命名卷或 `/srv/appdata` | 无，运行时产生 | 自研应用在机器 B；Plane 在机器 A |
 | 仓库凭据 | 机器 A 的 `htpasswd` | 无，现场生成 | `/srv/registry/htpasswd` |
 
 仓库里只有三个骨架目录（`template/`、`deploy/`、`registry/`），其余四类都不进版本控制 —— 要么是构建产物，要么是运行时状态，要么是密钥。
 
-服务器上的 `/srv/devops` 就是本仓库的检出，克隆与更新见 [README.md](README.md) 第二节第 1 步。机器 A 的 Zot 就在 `/srv/devops/registry` 下启动、就地读检出里的配置；机器 B 只用它查手册。两台都不在检出里改文件 —— 改动一律回本仓库 push 再 pull。
+服务器上的 `/srv/devops` 就是本仓库的检出，克隆与更新见 [deploy.md](deploy.md) 第二节第 1 步。机器 A 的 Zot 就在 `/srv/devops/registry` 下启动、就地读检出里的配置；机器 B 只用它查手册。两台都不在检出里改文件 —— 改动一律回本仓库 push 再 pull。
+
+服务落在哪台机器由 Dokploy 服务的 **Server** 字段决定，同一项目的服务可以分散在两台上；下面各节按当前分布写：自研应用在机器 B，Plane 在机器 A。
 
 ### 存续：丢了能不能重建
 
 | 资产 | 派生副本 | 丢失后果 | 备份频率 |
 |---|---|---|---|
 | 项目代码 | 机器 A 的检出 | 无，重新拉取 | 由 Gitee 负责 |
-| 部署文件 | 机器 A 检出、机器 B 下发件 | 无，重新拉取 | 由 Gitee 负责 |
+| 部署文件 | 机器 A 检出、运行机器上的下发件 | 无，重新拉取 | 由 Gitee 负责 |
 | 部署手册与骨架 | 两台机器的 `/srv/devops` | 无，重新克隆 | 由 Git 远端负责 |
-| **环境变量与服务定义** | 机器 B 的 `.env` | **不可重建**，等于丢掉全部部署配置 | 每日 |
+| **环境变量与服务定义** | 运行机器上的 `.env` | **不可重建**，等于丢掉全部部署配置 | 每日 |
 | 自研镜像 | 机器 B 本地镜像层 | 可重新构建，但历史版本没了就无法回滚 | 每周 |
 | 公共镜像缓存 | 无 | 无，下次拉取自动回源 | 不备份 |
 | **业务数据** | 无 | **不可重建** | 每日 |
 | 仓库凭据 | 无 | 可重建，但两台机器都要重新登录 | 变更时留存 |
 
-两处加粗的是全套设施里仅有的**不可再生数据**：Dokploy 的库和机器 B 的业务卷。其余全部可以从 Gitee 与上游重建。备份预算优先给这两项。
+两处加粗的是全套设施里仅有的**不可再生数据**：Dokploy 的库和各应用的业务卷（Plane 在机器 A，自研应用在机器 B）。其余全部可以从 Gitee 与上游重建。备份预算优先给这两项。
 
 ## 二、CI/CD 定义放在哪
 
@@ -49,7 +51,7 @@
 | 跑测试与 lint | **Dockerfile 的构建阶段** |
 | 构建镜像 | Dokploy（机器 A） |
 | 推送镜像 | Dokploy → Zot |
-| 部署 | Dokploy → 机器 B |
+| 部署 | Dokploy → 服务的运行机器 |
 | 回滚 | Dokploy 的 Deployments |
 
 测试写在 `docker/Dockerfile` 的构建阶段里（如 `RUN npm test`）：测试不过 → 构建失败 → 镜像不产生 → 部署不发生。只有一处定义，不会出现「CI 绿了但构建挂了」这种两套环境不一致的问题。
@@ -67,7 +69,7 @@
 |---|---|
 | 文件位置 | **应用仓库**根目录，按所选平台的约定目录放。不放部署仓库 |
 | 允许做 | 测试、lint、安全扫描、生成报告 |
-| 禁止做 | 构建并推送镜像、直接部署到机器 B |
+| 禁止做 | 构建并推送镜像、直接部署到任一运行机器 |
 
 最后一条是硬边界：**镜像的产地必须唯一**。CI 和 Dokploy 各推各的，`apps/<app>` 下就有了两个来源，回滚时分不清某个 tag 是谁推的、对应哪次提交，保留策略的计数也会被打乱。
 
@@ -78,7 +80,8 @@
 ```
 /etc/dokploy/                      # Dokploy 自建，不要手工修改
                                    # 内含 ★ 元数据库（服务定义与全部环境变量）、
-                                   # 源码检出、构建缓存、Traefik 配置。
+                                   # 源码检出、构建缓存、Traefik 配置，以及跑在 A 的
+                                   # 服务（Plane）的 compose 与 .env。
                                    # 子目录随版本变化，用 sudo ls /etc/dokploy 查看实际结构
 
 /srv/devops/                       # 本仓库的检出，更新用 git pull，不手工改
@@ -96,10 +99,14 @@
 ├── dokploy/                       # 每日 pg_dumpall
 └── registry/                      # 每周 rsync 镜像层
 
-/var/lib/docker/                   # 构建缓存与中间层，可随时清空
+/var/lib/docker/
+├── overlay2/                      # 构建缓存与中间层，可随时清空
+└── volumes/                       # ★ 跑在 A 的第三方栈命名卷（Plane）
 ```
 
 机器 A 上人工维护的只有 `/srv/registry/htpasswd`（现场生成，不入库）；`/srv/devops` 只用 `git pull` 更新；`/etc/dokploy/` 全部由 Dokploy 自己管。
+
+Plane 跑在机器 A，数据在 `/var/lib/docker/volumes/`，用命名卷而非 bind mount 的理由见第四节。
 
 ## 四、机器 B：运行平面
 
@@ -114,7 +121,7 @@
 
 /var/lib/docker/
 ├── overlay2/                      # 镜像层，可重拉
-└── volumes/                       # ★ 第三方栈的命名卷（Plane 等）
+└── volumes/                       # ★ 跑在 B 的第三方栈命名卷（当前为空，Plane 在机器 A）
 ```
 
 机器 B 上**没有源码、没有编排文件、没有 CI 定义、没有 nginx、没有 certbot** —— `/srv/devops` 里的 `deploy/` 骨架不算，它是手册的一部分，不被任何部署读取。人工只碰 `/srv/`。
@@ -128,7 +135,7 @@
 
 分界线就一句：**Dockerfile 是自己写的就用 bind mount，不是自己写的就用命名卷**。别为了目录整齐去和上游镜像的权限模型较劲。
 
-命名卷的实际位置是 `/var/lib/docker/volumes/<卷名>/_data`，可以直接 `ls`，只是不建议直接写。
+命名卷的实际位置是 `/var/lib/docker/volumes/<卷名>/_data`，落在服务所在的那台机器上，可以直接 `ls`，只是不建议直接写。
 
 ## 五、镜像仓库内的划分
 
@@ -146,14 +153,7 @@ registry.internal:5000/
 
 自研镜像同时打两个 tag：`<app>:<git-short-sha>` 用于回滚定位，`<app>:latest` 用于人读。
 
-回滚能回多远，由保留策略直接决定：
-
-| 仓库前缀 | 保留规则 | 含义 |
-|---|---|---|
-| `apps/**` | 保留最近推送的 10 个 | 最近 10 次部署可回滚，更早的镜像层被 GC |
-| `docker/**` | 保留 30 天内被拉取过的 | 长期不用的公共镜像自动清理，还在用的不会被误删 |
-
-要延长回滚窗口就调大 `mostRecentlyPushedCount`，代价是磁盘。改法见 [registry/README.md](registry/README.md) 第四节。
+回滚能回多远由 Zot 的保留策略决定：`apps/**` 保留最近 10 次推送，`docker/**` 保留 30 天内被拉过的。参数与调法见 [registry.md](registry.md) 第四节。
 
 ## 六、路径与地址的单一事实来源
 
@@ -164,9 +164,9 @@ registry.internal:5000/
 | `REGISTRY` | `registry.internal:5000` | 自研镜像仓库地址 |
 | `REGISTRY_NS` | `apps` | 自研镜像命名空间 |
 | `REGISTRY_CACHE` | `registry.internal:5000/docker` | 公共镜像前缀，留空则各服务直连 Docker Hub |
-| `APPDATA_ROOT` | `/srv/appdata` | 机器 B 上 bind mount 的根 |
+| `APPDATA_ROOT` | `/srv/appdata` | 自研应用所在机器（机器 B）上 bind mount 的根 |
 
-清单见 [deploy/env/common.env](deploy/env/common.env)。
+清单见 [deploy/env/common.env](../deploy/env/common.env)。
 
 ## 七、禁止事项
 

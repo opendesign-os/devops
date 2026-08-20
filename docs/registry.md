@@ -3,7 +3,7 @@
 Zot 是 CNCF 的 OCI 原生镜像仓库，单进程单容器，常驻内存 100~200 MB。
 它在本方案里同时承担两件事：存自研镜像（`apps/`）、代理缓存公共镜像（`docker/`）。
 
-**安装步骤不在本文。** 建目录、生成账号、启动、验证、登录，全部在 [../README.md](../README.md) 第五节，按那里一路做下来即可 —— 那一节以本仓库已克隆到机器 A 的 `/srv/devops` 为前提，克隆见其第二节第 1 步。本文只讲配置项含义、授权规则、保留策略调参与日常运维。
+**安装步骤不在本文。** 建目录、生成账号、启动、验证、登录，全部在 [deploy.md](deploy.md) 第五节，按那里一路做下来即可 —— 那一节以本仓库已克隆到机器 A 的 `/srv/devops` 为前提，克隆见其第二节第 1 步。本文只讲配置项含义、授权规则、保留策略调参与日常运维。
 
 ## 一、环境与设计取舍
 
@@ -24,15 +24,15 @@ Zot 是 CNCF 的 OCI 原生镜像仓库，单进程单容器，常驻内存 100~
 
 本方案不给端口加防火墙规则，而是让容器**只绑定 `10.8.0.1:5000`**。端口从一开始就没监听在公网网卡上，比"先开放再用防火墙堵"更难出事。代价是 wg0 必须先于 Docker 起来，否则容器绑不到地址会反复重启。
 
-确实无法建隧道时的替代路径（Traefik 反代 + 公网 HTTPS）见 [../README.md](../README.md) 第九节，与隧道方案互斥。
+确实无法建隧道时的替代路径（Traefik 反代 + 公网 HTTPS）见 [deploy.md](deploy.md) 第九节，与隧道方案互斥。
 
 ## 二、账号与授权
 
-授权规则写在 `config.json` 的 `http.accessControl` 里。权威副本是本仓库的 [config.json](config.json)，改动按这条链走：改仓库 → push → 机器 A `sudo git -C /srv/devops pull` → 重启容器生效，命令见第六节。
+授权规则写在 `config.json` 的 `http.accessControl` 里。权威副本是本仓库的 [config.json](../registry/config.json)，改动按这条链走：改仓库 → push → 机器 A `sudo git -C /srv/devops pull` → 重启容器生效，命令见第六节。
 
 | 账号 | `apps/**` | `docker/**` | 登录位置 |
 |---|---|---|---|
-| `ci` | read + create + update + delete | read | 机器 A，Dokploy 构建后推送 |
+| `ci` | read + create + update + delete | read | 机器 A，Dokploy 构建后推送，跑在 A 的服务也用它拉取 |
 | `deploy` | read | read | 机器 B，拉取运行 |
 | `admin` | 全部（走 `adminPolicy`） | 全部 | 仅登录 UI 用 |
 
@@ -42,7 +42,7 @@ Zot 的策略里 `read` 是其他动作的前提，写 `["create"]` 而不带 `r
 
 ## 三、Web UI
 
-UI 由 `extensions.ui` 提供，和 API 同端口，不额外占端口。管理员经 SSH 隧道访问，命令见 [../README.md](../README.md) 第八节。
+UI 由 `extensions.ui` 提供，和 API 同端口，不额外占端口。管理员经 SSH 隧道访问，命令见 [deploy.md](deploy.md) 第八节。
 
 UI 的漏洞面板依赖 `extensions.search` 的 CVE 能力，开启后会定期下载并更新漏洞库，额外占磁盘与内存。机器 A 资源紧张时，把 `search` 与 `ui` 两段一起从 config 里删掉即可，镜像存取与代理缓存完全不受影响。
 
@@ -96,7 +96,7 @@ sudo tar czf /srv/backup/registry-conf-$(date +%F).tar.gz -C /srv/registry htpas
 rsync -a --delete --exclude 'docker/' /srv/registry/data/ /srv/backup/registry/
 ```
 
-镜像的备份优先级低于 Dokploy 数据库 —— 自研镜像可以从 Gitee 的源码重新构建，只是历史版本没了会失去回滚能力。数据分级见 [../layout.md](../layout.md) 第一节。
+镜像的备份优先级低于 Dokploy 数据库 —— 自研镜像可以从 Gitee 的源码重新构建，只是历史版本没了会失去回滚能力。数据分级见 [layout.md](layout.md) 第一节。
 
 ## 六、运维命令与故障
 
