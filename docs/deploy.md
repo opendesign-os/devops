@@ -8,6 +8,8 @@
 
 **系统 Alibaba Cloud Linux 4**（RHEL 系，内核 6.6）。命令按它写：包管理用 `dnf`，入站靠阿里云安全组。
 
+每个代码块是**一次完整粘贴的单位**。带 `<<'EOF'` 的块从首行到单独的 `EOF` 才算一条命令，只粘中间的正文会报一串 `command not found`。
+
 | | 机器 A | 机器 B |
 |---|---|---|
 | 配置 | 4 核 / 8 GB / 120 GB | 4 核 / 8 GB / 200 GB |
@@ -59,25 +61,6 @@
 
 3000 是 Dokploy 面板、5000 是 Zot，都只经 SSH 隧道访问。Zot 容器还额外只绑定隧道地址 `10.8.0.1`，公网网卡上没有监听。
 
-### 章节顺序
-
-从上到下按序执行，本文是唯一的操作步骤来源。
-
-| 顺序 | 章节 | 在哪操作 |
-|---|---|---|
-| 1 | [二、准备](#二准备) | 第 1 步只在 A，其余两台都做 |
-| 2 | [三、建隧道](#三建隧道) | 先 A 后 B |
-| 3 | [四、机器 A：Dokploy](#四机器-adokploy) | 只在 A |
-| 4 | [五、机器 A：Zot 镜像仓库](#五机器-azot-镜像仓库) | 只在 A |
-| 5 | [六、机器 B：接入](#六机器-b接入) | 只在 B，末尾要回 A 点一次 |
-| 6 | [七、新项目接入](#七新项目接入) | Dokploy 面板 + Gitee |
-
-### 命令的读法
-
-每个代码块是**一次完整粘贴的单位**，不要按行拆开。带 `<<'EOF'` 的块从首行一直到单独的 `EOF` 才算一条命令 —— 只粘中间的 JSON 或配置正文，shell 会把 `{` 当成命令组、把 `"key":` 当成命令名，报一串 `command not found`，而文件根本没写成。
-
-命令里的 `<尖括号>` 要先换成上表的实际值再执行。
-
 ## 二、准备
 
 **第 1 步只在机器 A，第 2～7 步两台都做、可并行。**
@@ -96,7 +79,7 @@ sudo git -C /srv/devops pull
 
 `sudo` 与 `-C` 都不能省：检出属 root，普通用户执行 `git pull` 报 `detected dubious ownership`；不带 `-C` 要先 `cd` 进目录。
 
-拉不动 GitHub（卡在 `Cloning into` 或报 `Failed to connect`）：按 [proxy.md](proxy.md) 给服务器开代理后重试，`sudo git` 读 root 的配置、代理要给 root 也配一次；或在 Gitee 建镜像仓库，把地址换成镜像地址。
+拉不动 GitHub 时按 [proxy.md](proxy.md) 开代理后重试 —— `sudo git` 读 root 的配置，代理要给 root 也配一次。
 
 手册随检出到机器上，`less /srv/devops/docs/deploy.md` 直接读。
 
@@ -158,7 +141,7 @@ sudo sed -i '/registry.internal/d' /etc/hosts
 
 ### 6 · 配 daemon.json 并重启 Docker
 
-这个文件配三件事：`insecure-registries` 允许对 `registry.internal:5000` 走 HTTP 且不校验证书，豁免仅限这一个地址；`log-driver` 与 `log-opts` 给容器日志加轮转，单文件上限 50 MB、保留 3 个，即每个容器的日志最多占 150 MB —— 不配的话 json-file 默认不轮转，长跑的容器迟早把磁盘写满。
+`insecure-registries` 允许对 `registry.internal:5000` 走 HTTP，豁免仅限这一个地址；`log-opts` 给容器日志加轮转，每个容器最多占 150 MB —— 不配的话 json-file 默认不轮转，迟早把磁盘写满。
 
 先看文件是不是空的。**有内容就别照下面覆盖** —— 要把已有配置与 `insecure-registries` 合并后再写，直接覆盖会丢掉别的组件（如 Dokploy）写进去的设置：
 
@@ -366,12 +349,6 @@ sudo wc -l < /srv/registry/htpasswd
 
 `ci` 在机器 A 推送、`deploy` 在机器 B 拉取、`admin` 只用于登录 UI，权限矩阵见 [registry.md](registry.md) 第二节。
 
-**备选**（宿主机装不了 `httpd-tools` 时才用）：借容器里的 `htpasswd` 生成。`-b` 会把密码明文留在 shell 历史里，事后要 `history -c`；且此时 Zot 未启动，拉这个镜像只能直连 Docker Hub：
-
-```bash
-docker run --rm httpd:2.4-alpine htpasswd -bBn ci '<密码>' | sudo tee -a /srv/registry/htpasswd
-```
-
 ### 3 · 启动
 
 ```bash
@@ -469,22 +446,6 @@ sudo sshd -T | grep -E 'permitrootlogin|pubkeyauthentication'
 
 期望 `pubkeyauthentication yes`、`permitrootlogin` 为 `yes` 或 `prohibit-password`；不满足改 `/etc/ssh/sshd_config` 后 `sudo systemctl restart sshd`。
 
-改用非 root 用户（如 `deployer`）换成这三条：
-
-```bash
-sudo useradd -m -s /bin/bash deployer && sudo install -d -m 700 -o deployer -g deployer /home/deployer/.ssh
-```
-
-```bash
-echo '<粘贴 Public Key>' | sudo tee /home/deployer/.ssh/authorized_keys > /dev/null && sudo chown deployer:deployer /home/deployer/.ssh/authorized_keys && sudo chmod 600 /home/deployer/.ssh/authorized_keys
-```
-
-```bash
-echo 'deployer ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/deployer > /dev/null && sudo chmod 440 /etc/sudoers.d/deployer && sudo visudo -c
-```
-
-`visudo -c` 输出 `parsed OK` 才算成功。
-
 ### 5 · 回机器 A 点 Setup Server
 
 > **这一步在机器 A 的面板里操作，装的是机器 B。**
@@ -546,7 +507,17 @@ Plane 是 13 个容器的第三方栈，用 **Compose** 类型。
 
 每个栈一个部署仓库，push 只触发它自己的服务。换别的第三方栈就在 Gitee 另建一个仓库、根目录同样放 `compose.yaml`，Server 换成它的运行机器；通用骨架见 [deploy/projects/example/compose.yaml](../deploy/projects/example/compose.yaml)，自研应用的卷写成 `${APPDATA_ROOT}/<app>/<子目录>`，原因见 [layout.md](layout.md) 第四节。
 
-Deploy 报 `Compose file not found` 时，先在机器 A 上看实际检出了什么：`sudo ls -la /etc/dokploy/compose/<服务名>/code`。空目录说明克隆失败：日志里 `could not read Username for 'https://gitee.com'` 是私有仓库走了 HTTPS，按第 4 步换成 SSH 地址；`Host key verification failed` 则在机器 A 上执行一次 `sudo ssh -T -o StrictHostKeyChecking=accept-new git@gitee.com`。有文件但没有编排文件，是 Compose Path 或 Branch 填错，也可能改动还没 push 到远端。
+Deploy 报 `Compose file not found` 时，先看机器 A 上实际检出了什么：
+
+```bash
+sudo ls -la /etc/dokploy/compose/<服务名>/code
+```
+
+| 检出结果 / 日志 | 原因与处理 |
+|---|---|
+| 目录是空的，日志 `could not read Username for 'https://gitee.com'` | 私有仓库走了 HTTPS，按第 4 步换成 SSH 地址 |
+| 目录是空的，日志 `Host key verification failed` | 机器 A 上执行一次 `sudo ssh -T -o StrictHostKeyChecking=accept-new git@gitee.com` |
+| 有文件但没有编排文件 | Compose Path 或 Branch 填错，或改动还没 push 到远端 |
 
 ### 自研应用
 
@@ -563,24 +534,22 @@ Deploy 报 `Compose file not found` 时，先在机器 A 上看实际检出了�
 
 ## 八、日常操作
 
-| 操作 | 位置 |
+| 操作 | 命令 / 位置 |
 |---|---|
 | 部署 / 回滚 / 看日志 / 改变量 | Dokploy 服务页 |
 | 改编排 | 提交到部署仓库，重新部署时自动拉取 |
-| 更新机器 A 的检出 | `sudo git -C /srv/devops pull` |
-| Zot 重启 / 看日志 / 同步配置 / 查磁盘 | 见 [registry.md](registry.md) 第六节 |
 | 开 Dokploy 面板 | `ssh -L 3000:localhost:3000 <SSH用户>@<机器A公网IP>` |
-| 开 Zot UI | `ssh -L 5000:10.8.0.1:5000 <SSH用户>@<机器A公网IP>`，此处不能写 localhost，Zot 只绑隧道地址 |
-| 查隧道 | `sudo wg show` |
-| 重连隧道 | `sudo systemctl restart wg-quick@wg0` |
+| 开 Zot UI | `ssh -L 5000:10.8.0.1:5000 <SSH用户>@<机器A公网IP>`，浏览器开 `http://localhost:5000` 用 `admin` 登录。**不能写 localhost**，Zot 只绑隧道地址 |
+| 查隧道 / 重连 | `sudo wg show` / `sudo systemctl restart wg-quick@wg0` |
+| 更新检出、重启 Zot、改配置生效、查磁盘 | 见 [registry.md](registry.md) 第六节 |
+| Plane 自检、备份、升级 | 见 [plane.md](plane.md) 第三、四节 |
+| 备份与恢复策略、回滚深度 | 见 [layout.md](layout.md) 第一节、[registry.md](registry.md) 第四五节 |
 
-Zot UI 用 `admin` 账号登录，浏览器开 `http://localhost:5000`。
+恢复 Dokploy 的库（机器 A），先停面板：
 
-回滚深度由保留策略决定，默认每个镜像保留最近 10 次推送，见 [registry.md](registry.md) 第四节。
-
-业务数据备份在应用实际运行的那台机器上做，Plane 的备份与恢复见 [plane.md](plane.md) 第四节，Zot 的见 [registry.md](registry.md) 第五节。
-
-恢复 Dokploy 的库（机器 A，恢复前先 `docker stop $(docker ps -qf name=dokploy)` 停面板）：
+```bash
+docker stop $(docker ps -qf name=dokploy)
+```
 
 ```bash
 gunzip -c /srv/backup/dokploy/dokploy-<日期>.sql.gz | sudo docker exec -i $(sudo docker ps -qf name=dokploy-postgres) psql -U dokploy
@@ -592,66 +561,14 @@ gunzip -c /srv/backup/dokploy/dokploy-<日期>.sql.gz | sudo docker exec -i $(su
 
 | 组件 | 怎么升 |
 |---|---|
-| 检出 `/srv/devops` | `sudo git -C /srv/devops pull` —— 见下面「更新检出」，改 Zot 配置或升级 Zot 前都要先做 |
-| Zot | 更新检出后 `cd /srv/devops/registry && sudo docker compose up -d`，见 [registry.md](registry.md) 第六节 |
-| Plane | Environment 里 `APP_RELEASE` 改版本号再 Deploy，见 [plane.md](plane.md) 第四节 |
+| Zot | `sudo git -C /srv/devops pull`，再 `cd /srv/devops/registry && sudo docker compose up -d` |
+| Plane | Environment 里 `APP_RELEASE` 改版本号，**重做第七节第 7 步的预热**，再 Deploy |
 | 自研应用 | push 到应用仓库，webhook 触发构建部署；回滚走服务页的 Deployments |
-| Dokploy | 面板 Settings 里出现新版本提示时点更新 |
-| 系统与 Docker | `sudo dnf update`，之后按下面的顺序检查 |
+| Dokploy | 面板 Settings 出现新版本提示时点更新。升级会重启面板与 Traefik，挑没有部署任务时做 |
+| 系统与 Docker | `sudo dnf update`；内核更新要重启机器才生效 |
 
-**更新检出**（只在机器 A，机器 B 没有检出）：
-
-```bash
-sudo git -C /srv/devops pull
-```
-
-被就地改过时 pull 会以 `local changes would be overwritten` 拒绝，先丢掉本地改动再 pull：
-
-```bash
-sudo git -C /srv/devops checkout -- registry/config.json && sudo git -C /srv/devops pull
-```
-
-pull 只换文件，不会让运行中的容器生效。下面两条都必须在 **`/srv/devops/registry`** 下执行 —— compose 认的是当前目录里的 `compose.yaml`，在别的目录跑会报找不到编排文件。
-
-改了 `registry/config.json`：
-
-```bash
-cd /srv/devops/registry && sudo docker compose restart
-```
-
-改了 `registry/compose.yaml`：
-
-```bash
-cd /srv/devops/registry && sudo docker compose up -d
-```
-
-后者不能用 `restart` 代替 —— `restart` 不重建容器，新的 `ports`、`image`、`volumes` 不会生效。
-
-Dokploy 升级会重启面板与 Traefik，面板短暂不可用，业务容器不受影响 —— 挑没有部署任务在跑的时候做。
-
-**Docker 升级或机器重启后，wg0 必须先于 Zot 容器起来**，否则它绑不到 `10.8.0.1:5000` 会反复重启。内核更新要重启机器才生效，重启后先查这两项：
+**机器重启后 wg0 必须先于 Zot 容器起来**，否则 Zot 绑不到 `10.8.0.1:5000` 会反复重启。重启后先查这两项：
 
 ```bash
 sudo wg show && sudo docker ps --filter name=zot --format '{{.Names}}\t{{.Status}}'
 ```
-
-跑在机器 A 的 Plane 靠 `restart: unless-stopped` 自动拉起，稳定态是 12 个容器 Up —— 第 13 个是跑完即退的 `migrator`：
-
-```bash
-sudo docker ps --filter name=plane --format '{{.Status}}' | wc -l
-```
-
-## 九、附录：不建隧道，改用公网 HTTPS
-
-只有在无法建立隧道时才走这条路，仓库会暴露在公网扫描下，与第三、五节的隧道方案**互斥**。
-
-机器 A 上 80/443 已被 Dokploy 的 Traefik 占用，因此**不要让 Zot 自己签证书**，而是让 Traefik 反代它：
-
-1. 改仓库里的 `registry/compose.yaml`，端口改成 `"127.0.0.1:5000:5000"` 并接入 `dokploy-network`，push 后在机器 A `sudo git -C /srv/devops pull` 并重新 `docker compose up -d`
-2. `registry.example.com` 解析到机器 A 公网 IP
-3. 在 Dokploy 里把该域名反代到 Zot 容器的 5000，勾选 Let's Encrypt。反代需放开请求体限制并延长超时，否则推大镜像会失败
-4. 两台机器的 `daemon.json` **删掉** `insecure-registries`
-5. 项目共享变量里 `REGISTRY` 改成 `registry.example.com`、`REGISTRY_CACHE` 改成 `registry.example.com/docker`（都去掉 `:5000`），两台机器重新 `sudo docker login`
-6. 确认 `anonymousPolicy` 仍为空数组 —— 公网暴露下，匿名可读等于把镜像公开
-
-Zot 也支持在 `http.tls` 里直接配证书，但那样要自己解决续期，不如复用已有的 Traefik。

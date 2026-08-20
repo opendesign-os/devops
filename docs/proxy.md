@@ -90,12 +90,6 @@ sudo sed -i '$a proxy=http://127.0.0.1:7898' /etc/dnf/dnf.conf
 
 追加在文件末尾。`dnf.conf` 若 `[main]` 之外还有别的段，需手动把这行移到 `[main]` 下。
 
-Ubuntu/Debian：
-
-```bash
-echo 'Acquire::http::Proxy "http://127.0.0.1:7898"; Acquire::https::Proxy "http://127.0.0.1:7898";' | sudo tee /etc/apt/apt.conf.d/99proxy
-```
-
 ### 5 · Docker 拉镜像
 
 ```bash
@@ -118,11 +112,6 @@ sudo systemctl show docker --property=Environment
 |---|---|
 | 构建时联网 | `docker build --network host --build-arg HTTP_PROXY=http://127.0.0.1:7898 .` |
 | 临时跑容器 | `docker run --network host ...` |
-| 必须用 bridge | 见下，容器内改用 `http://172.17.0.1:7898` |
-
-```bash
-socat TCP-LISTEN:7898,bind=172.17.0.1,fork,reuseaddr TCP:127.0.0.1:7898 &
-```
 
 ## 四、删除
 
@@ -156,14 +145,10 @@ git config --global --unset http.https://github.com/.proxy
 sudo git config --global --unset http.https://github.com/.proxy
 ```
 
-### 5 · dnf / apt
+### 5 · dnf
 
 ```bash
 sudo sed -i '/^proxy=http:\/\/127.0.0.1:7898/d' /etc/dnf/dnf.conf
-```
-
-```bash
-sudo rm -f /etc/apt/apt.conf.d/99proxy
 ```
 
 ### 6 · Docker daemon
@@ -178,13 +163,7 @@ sudo systemctl daemon-reload && sudo systemctl restart docker
 
 重启 dockerd 会中断正在进行的拉取和构建，挑没有部署任务时做。
 
-### 7 · socat 中转
-
-```bash
-sudo pkill -f 'socat TCP-LISTEN:7898'
-```
-
-### 8 · 残留自检
+### 7 · 残留自检
 
 ```bash
 env | grep -i proxy; git config --global --get-regexp proxy; sudo git config --global --get-regexp proxy; grep -rn 7898 /etc/dnf/dnf.conf /etc/systemd/system/docker.service.d/ ~/.bashrc 2>/dev/null; ss -lnt | grep 7898

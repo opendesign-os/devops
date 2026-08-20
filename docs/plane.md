@@ -35,22 +35,16 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 
 保持不动：`SITE_ADDRESS=:80`（容器内 Caddy 的监听端口，与宿主机的 4141 无关）、`MINIO_ENDPOINT_SSL=0`（全站 HTTP，不签证书）。公共变量用 `${{project.REGISTRY_CACHE}}` 引用，不要重复定义。
 
-**`CERT_ACME_CA` 必须有值，哪怕压根不签证书** —— 这是唯一一个「留空即崩」的变量。proxy 镜像里 Caddyfile 第 28 行是
+**`CERT_ACME_CA` 必须有值，哪怕压根不签证书** —— 唯一一个「留空即崩」的变量，`plane.env` 里已写死 Let's Encrypt 地址，别清空。
 
-```
-acme_ca {$CERT_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
-```
-
-而 Caddy 的 `{$VAR:默认值}` 只在变量**未设置**时才用默认值；设成空字符串会老老实实替换成空，`acme_ca` 后面就没有参数了，Caddy 拒绝启动、容器无限重启：
+proxy 镜像的 Caddyfile 第 28 行是 `acme_ca {$CERT_ACME_CA:https://acme-v02...}`，而 Caddy 的 `{$VAR:默认值}` 只在变量**未设置**时用默认值；设成空字符串就替换成空，`acme_ca` 后面没有参数，Caddy 拒绝启动、容器无限重启：
 
 ```
 Error: adapting config using caddyfile: parsing caddyfile tokens for 'acme_ca':
 wrong argument count or unexpected line ending after 'acme_ca', at /etc/caddy/Caddyfile:28
 ```
 
-compose 里写的是 `CERT_ACME_CA: ${CERT_ACME_CA}`，取到空值也会把容器里这个变量设成空串 —— 「不填」和「未设置」在这里不是一回事。所以 `plane.env` 直接给它写死了 Let's Encrypt 的地址；`SITE_ADDRESS=:80` 是纯 HTTP，Caddy 不会真去签证书，这个值只为让 Caddyfile 解析通过。
-
-同段的 `CERT_EMAIL=` 与 `CERT_ACME_DNS=` 留空则没问题 —— 它们在 Caddyfile 里是独占一行的裸占位符，替换成空就是空行。
+compose 写的是 `CERT_ACME_CA: ${CERT_ACME_CA}`，取到空值同样会把容器里的变量设成空串 —— **「不填」和「未设置」不是一回事**。`SITE_ADDRESS=:80` 是纯 HTTP，Caddy 不会真去签证书，这个值只为让 Caddyfile 解析通过。同段的 `CERT_EMAIL=`、`CERT_ACME_DNS=` 留空无妨，它们是独占一行的裸占位符。
 
 用外部 S3/OSS 的话，删掉 compose 里的 `plane-minio` 服务，把 `AWS_*` 换成对象存储的地址与密钥。
 

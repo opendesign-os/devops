@@ -56,7 +56,7 @@ flowchart LR
 
 ## 目录
 
-本仓库要克隆到机器 A 的 `/srv/devops`：Zot 从 `registry/` 就地启动，手册也随之在机器上。机器 B 不需要检出，它的编排与 `.env` 由 Dokploy 经 SSH 下发。克隆是 [docs/deploy.md](docs/deploy.md) 第二节第 1 步，也是全流程的第一步。
+克隆到机器 A 的 `/srv/devops` —— Zot 从 `registry/` 就地启动，手册也随之上机。这是 [docs/deploy.md](docs/deploy.md) 第二节第 1 步，也是全流程的第一步。机器 B 不需要检出。
 
 | 目录 | 服务器上怎么用 | 说明 |
 |---|---|---|
