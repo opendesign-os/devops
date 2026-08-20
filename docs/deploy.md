@@ -2,11 +2,11 @@
 
 从零到跑起来的全部操作步骤，唯一来源。架构总览、文档索引与目录说明见 [../README.md](../README.md)。
 
-机器 A 的 Zot 从本仓库的检出 `/srv/devops` 启动，克隆是第五节第 1 步；机器 B 不需要检出，它的编排与 `.env` 由 Dokploy 经 SSH 下发。
+第一步就是把本仓库克隆到机器 A 的 `/srv/devops` —— Zot 从这份检出启动，配置也从这里读。机器 B 不需要检出，它的编排与 `.env` 由 Dokploy 经 SSH 下发。
 
 ## 一、前提
 
-**系统 Alibaba Cloud Linux 3**（RHEL 系，内核 5.10）。命令按它写：包管理用 `dnf`，入站靠阿里云安全组。换 Ubuntu/Debian 需把 `dnf` 换成 `apt`、`httpd-tools` 换成 `apache2-utils`。
+**系统 Alibaba Cloud Linux 3**（RHEL 系，内核 5.10）。命令按它写：包管理用 `dnf`，入站靠阿里云安全组。
 
 | | 机器 A | 机器 B |
 |---|---|---|
@@ -26,8 +26,8 @@
 | `<机器A公网IP>` | 阿里云控制台，机器 A 的公网 IP |
 | `<机器B公网IP>` | 阿里云控制台，机器 B 的公网 IP |
 | `<SSH用户>` | 登录服务器的账号，如 `root` |
-| `<机器A私钥>` `<机器A公钥>` | 第二节第 3 步在机器 A 上生成 |
-| `<机器B私钥>` `<机器B公钥>` | 第二节第 3 步在机器 B 上生成 |
+| `<机器A私钥>` `<机器A公钥>` | 第二节第 4 步在机器 A 上生成 |
+| `<机器B私钥>` `<机器B公钥>` | 第二节第 4 步在机器 B 上生成 |
 | `ci.example.com` | 换成你给机器 A 准备的真实域名 |
 
 **下面这些是固定值，不要改成公网 IP：**
@@ -65,7 +65,7 @@
 
 | 顺序 | 章节 | 在哪操作 |
 |---|---|---|
-| 1 | [二、准备](#二准备) | 两台机器都做，可并行 |
+| 1 | [二、准备](#二准备) | 第 1 步只在 A，其余两台都做 |
 | 2 | [三、建隧道](#三建隧道) | 先 A 后 B |
 | 3 | [四、机器 A：Dokploy](#四机器-adokploy) | 只在 A |
 | 4 | [五、机器 A：Zot 镜像仓库](#五机器-azot-镜像仓库) | 只在 A |
@@ -80,9 +80,27 @@
 
 ## 二、准备
 
-**两台机器都要做，内容完全一样，可以并行。**
+**第 1 步只在机器 A，第 2～7 步两台都做、可并行。**
 
-### 1 · 挂 4 GB swap
+### 1 · 克隆本仓库（只在机器 A）
+
+```bash
+sudo dnf install -y git && sudo git clone https://github.com/opendesign-os/devops.git /srv/devops
+```
+
+已克隆过则改为更新：
+
+```bash
+sudo git -C /srv/devops pull
+```
+
+`sudo` 与 `-C` 都不能省：检出属 root，普通用户执行 `git pull` 报 `detected dubious ownership`；不带 `-C` 要先 `cd` 进目录。
+
+拉不动 GitHub（卡在 `Cloning into` 或报 `Failed to connect`）：按 [proxy.md](proxy.md) 给服务器开代理后重试，`sudo git` 读 root 的配置、代理要给 root 也配一次；或在 Gitee 建镜像仓库，把地址换成镜像地址。
+
+手册随检出到机器上，`less /srv/devops/docs/deploy.md` 直接读。
+
+### 2 · 挂 4 GB swap
 
 ```bash
 sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
@@ -90,7 +108,7 @@ sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
 
 报 `Text file busy` 说明已经挂过了，`swapon --show` 确认后跳过。此时 `&&` 已中断，`/etc/fstab` 不会重复追加。
 
-### 2 · 装 Docker
+### 3 · 装 Docker
 
 `get.docker.com` 不认 `alinux`，改用 CentOS 源。`$releasever` 那步 sed 不能省 —— alinux 的值是 3，docker-ce 源没有 3 的目录。
 
@@ -100,7 +118,7 @@ sudo dnf install -y dnf-utils && sudo dnf config-manager --add-repo https://mirr
 
 报 `containerd.io` 与自带 `runc` 冲突时，末尾加 `--allowerasing`。
 
-### 3 · 装 WireGuard 并生成密钥
+### 4 · 装 WireGuard 并生成密钥
 
 alinux 官方源里没有任何 wireguard 包，必须挂 EPEL。`epel-release` 是 CentOS 的包名，这里装不了，直接写源文件；版本写死 8，同样因为 `$releasever` 是 3。内核 5.10 已内置 wg 模块，只装 tools。
 
@@ -118,7 +136,7 @@ sudo dnf install -y wireguard-tools && umask 077 && wg genkey | sudo tee /etc/wi
 
 末尾打印的是**公钥**；私钥已写入 `/etc/wireguard/privatekey`，它在管道里被 `wg pubkey` 消费掉了所以不显示，属正常。
 
-### 4 · 配主机名
+### 5 · 配主机名
 
 ```bash
 grep -q registry.internal /etc/hosts || echo '10.8.0.1 registry.internal' | sudo tee -a /etc/hosts
@@ -138,7 +156,7 @@ grep -c registry.internal /etc/hosts
 sudo sed -i '/registry.internal/d' /etc/hosts
 ```
 
-### 5 · 配 daemon.json 并重启 Docker
+### 6 · 配 daemon.json 并重启 Docker
 
 这个文件配三件事：`insecure-registries` 允许对 `registry.internal:5000` 走 HTTP 且不校验证书，豁免仅限这一个地址；`log-driver` 与 `log-opts` 给容器日志加轮转，单文件上限 50 MB、保留 3 个，即每个容器的日志最多占 150 MB —— 不配的话 json-file 默认不轮转，长跑的容器迟早把磁盘写满。
 
@@ -168,7 +186,7 @@ cat /etc/docker/daemon.json && sudo systemctl restart docker
 
 **若已经装过 Dokploy**（顺序颠倒了），这次重启会把 Dokploy 的容器一并重启，等半分钟面板恢复，数据不受影响。
 
-### 6 · 取出密钥
+### 7 · 取出密钥
 
 两台机器都执行，把值记下来。
 
@@ -181,7 +199,7 @@ sudo cat /etc/wireguard/privatekey; sudo cat /etc/wireguard/publickey
 | 私钥 | **本机** wg0.conf 的 `[Interface] PrivateKey`，不出本机 |
 | 公钥 | **对端** wg0.conf 的 `[Peer] PublicKey` |
 
-**密钥一旦重新生成，对端的配置也必须同步更新** —— 重复执行第 3 步会覆盖旧密钥，对端还填着旧公钥的话，包会被静默丢弃，表现为 ping 不通但没有任何报错。
+**密钥一旦重新生成，对端的配置也必须同步更新** —— 重复执行第 4 步会覆盖旧密钥，对端还填着旧公钥的话，包会被静默丢弃，表现为 ping 不通但没有任何报错。
 
 验证本机这对是否配套，下面这条的输出必须与上面的公钥一致：
 
@@ -189,7 +207,7 @@ sudo cat /etc/wireguard/privatekey; sudo cat /etc/wireguard/publickey
 sudo cat /etc/wireguard/privatekey | wg pubkey
 ```
 
-> **两台机器都做完这 6 步再往下。** 建隧道要用对方的公钥，缺一台就没法填。
+> **两台机器都做完再往下。** 建隧道要用对方的公钥，缺一台就没法填。
 
 ## 三、建隧道
 
@@ -308,29 +326,9 @@ crontab -l
 
 容器**只绑定 `10.8.0.1:5000`**，公网网卡上不监听；代价是 wg0 必须先于容器起来，否则绑不到地址会反复重启。
 
-配置与状态分两处：检出里的 [compose.yaml](../registry/compose.yaml) 与 [config.json](../registry/config.json) 由容器就地读；`/srv/registry/` 只放运行时状态，即 `htpasswd` 与镜像层 `data/`。目录划分见 [layout.md](layout.md) 第三节，配置项含义、权限矩阵、保留策略调参与运维命令见 [registry.md](registry.md)。
+检出里的 [compose.yaml](../registry/compose.yaml) 与 [config.json](../registry/config.json) 由容器就地读，`/srv/registry/` 只放 `htpasswd` 与镜像层 `data/`。配置项含义与运维命令见 [registry.md](registry.md)。
 
-### 1 · 克隆本仓库
-
-Zot 从检出目录启动，所以先把仓库克隆到 `/srv/devops`：
-
-```bash
-sudo dnf install -y git && sudo git clone https://github.com/opendesign-os/devops.git /srv/devops
-```
-
-已经克隆过的话，改成更新：
-
-```bash
-sudo git -C /srv/devops pull
-```
-
-`sudo` 与 `-C` 都不能省：检出属 root，普通用户执行 `git pull` 会报 `detected dubious ownership`；不带 `-C` 就得先 `cd` 进去，否则报 `not a git repository`。
-
-拉不动 GitHub（卡在 `Cloning into` 或报 `Failed to connect`）时两条路：按 [proxy.md](proxy.md) 借本机 Clash 给服务器临时开代理后重试，注意 `sudo git` 读的是 root 的配置，代理要给 root 也配一次；或在 Gitee 建一个镜像仓库，把上面的地址换成镜像地址。
-
-手册也随之到了机器上，`less /srv/devops/docs/deploy.md` 直接读。
-
-### 2 · 建目录
+### 1 · 建目录
 
 ```bash
 sudo mkdir -p /srv/registry/data && sudo chmod 755 /srv/registry
@@ -338,7 +336,7 @@ sudo mkdir -p /srv/registry/data && sudo chmod 755 /srv/registry
 
 容器以 root 运行，数据目录不需要额外 chown。
 
-### 3 · 生成三个账号
+### 2 · 生成三个账号
 
 Zot 只认 **bcrypt**，`-B` 不能省。
 
@@ -374,7 +372,7 @@ sudo wc -l < /srv/registry/htpasswd
 docker run --rm httpd:2.4-alpine htpasswd -bBn ci '<密码>' | sudo tee -a /srv/registry/htpasswd
 ```
 
-### 4 · 启动
+### 3 · 启动
 
 ```bash
 cd /srv/devops/registry && sudo docker compose up -d
@@ -384,7 +382,7 @@ cd /srv/devops/registry && sudo docker compose up -d
 
 首次拉取 zot 镜像约 100 MB，秒级启动。起不来先 `sudo wg show` 确认隧道。
 
-### 5 · 验证
+### 4 · 验证
 
 未认证访问应返回 `401`，说明服务活着且鉴权生效：
 
@@ -398,7 +396,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://registry.internal:5000/v2/
 curl -m 5 http://<机器A公网IP>:5000/v2/
 ```
 
-### 6 · 登录仓库（推送用）
+### 5 · 登录仓库（推送用）
 
 ```bash
 sudo docker login registry.internal:5000 -u ci
@@ -406,7 +404,7 @@ sudo docker login registry.internal:5000 -u ci
 
 `sudo` 不能省：Dokploy 以 root 执行 docker，凭据要落在 `/root/.docker/config.json`。写进普通用户的 `~/.docker/config.json` 时，构建推送与 compose 拉取都会报 `unauthorized` —— Zot 的 `anonymousPolicy` 是空数组，匿名无任何权限。
 
-### 7 · 面板配 Registry
+### 6 · 面板配 Registry
 
 左侧导航 **Registry** → Add，按下表填：
 
@@ -414,7 +412,7 @@ sudo docker login registry.internal:5000 -u ci
 |---|---|
 | Registry Name | 面板内的显示名，随意，建议 `zot-internal` |
 | Username | `ci` |
-| Password | 第 3 步给 `ci` 设的口令 |
+| Password | 第 2 步给 `ci` 设的口令 |
 | Image Prefix | `apps` |
 | Registry URL | `registry.internal:5000`，只要主机名与端口，不带 `http://` |
 | Server (Optional) | 留空 |
@@ -573,9 +571,54 @@ Zot UI 用 `admin` 账号登录，浏览器开 `http://localhost:5000`。
 
 回滚深度由保留策略决定，默认每个镜像保留最近 10 次推送，见 [registry.md](registry.md) 第四节。
 
-业务数据备份在应用实际运行的那台机器上做，Plane 的见 [plane.md](plane.md) 第四节。
+业务数据备份在应用实际运行的那台机器上做，Plane 的备份与恢复见 [plane.md](plane.md) 第四节，Zot 的见 [registry.md](registry.md) 第五节。
+
+恢复 Dokploy 的库（机器 A，恢复前先 `docker stop $(docker ps -qf name=dokploy)` 停面板）：
+
+```bash
+gunzip -c /srv/backup/dokploy/dokploy-<日期>.sql.gz | sudo docker exec -i $(sudo docker ps -qf name=dokploy-postgres) psql -U dokploy
+```
 
 **已知问题**：Dokploy 用私有 registry 时回滚不执行 `docker login`（[issue #3861](https://github.com/Dokploy/dokploy/issues/3861)）。机器 B 重装或凭据失效后，先手工 `sudo docker login` 再回滚。
+
+### 升级
+
+| 组件 | 怎么升 |
+|---|---|
+| 检出 `/srv/devops` | `sudo git -C /srv/devops pull` —— 见下面「更新检出」，改 Zot 配置或升级 Zot 前都要先做 |
+| Zot | 更新检出后 `cd /srv/devops/registry && sudo docker compose up -d`，见 [registry.md](registry.md) 第六节 |
+| Plane | Environment 里 `APP_RELEASE` 改版本号再 Deploy，见 [plane.md](plane.md) 第四节 |
+| 自研应用 | push 到应用仓库，webhook 触发构建部署；回滚走服务页的 Deployments |
+| Dokploy | 面板 Settings 里出现新版本提示时点更新 |
+| 系统与 Docker | `sudo dnf update`，之后按下面的顺序检查 |
+
+**更新检出**（只在机器 A，机器 B 没有检出）：
+
+```bash
+sudo git -C /srv/devops pull
+```
+
+被就地改过时 pull 会以 `local changes would be overwritten` 拒绝，先丢掉本地改动再 pull：
+
+```bash
+sudo git -C /srv/devops checkout -- registry/config.json && sudo git -C /srv/devops pull
+```
+
+pull 只换文件，不会让运行中的容器生效：改了 `config.json` 用 `docker compose restart`，改了 `compose.yaml` 用 `docker compose up -d`。
+
+Dokploy 升级会重启面板与 Traefik，面板短暂不可用，业务容器不受影响 —— 挑没有部署任务在跑的时候做。
+
+**Docker 升级或机器重启后，wg0 必须先于 Zot 容器起来**，否则它绑不到 `10.8.0.1:5000` 会反复重启。内核更新要重启机器才生效，重启后先查这两项：
+
+```bash
+sudo wg show && sudo docker ps --filter name=zot --format '{{.Names}}\t{{.Status}}'
+```
+
+跑在机器 A 的 Plane 靠 `restart: unless-stopped` 自动拉起，稳定态是 12 个容器 Up —— 第 13 个是跑完即退的 `migrator`：
+
+```bash
+sudo docker ps --filter name=plane --format '{{.Status}}' | wc -l
+```
 
 ## 九、附录：不建隧道，改用公网 HTTPS
 

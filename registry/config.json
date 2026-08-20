@@ -89,7 +89,7 @@
   },
 
   "scheduler": {
-    "numWorkers": 3
+    "numWorkers": 8
   },
 
   "extensions": {
@@ -97,11 +97,11 @@
       "enable": true,
       "registries": [
         {
-          "urls": ["https://docker.m.daocloud.io", "https://index.docker.io"],
+          "urls": ["https://docker.m.daocloud.io"],
           "onDemand": true,
           "tlsVerify": true,
-          "maxRetries": 5,
-          "retryDelay": "5m",
+          "maxRetries": 3,
+          "retryDelay": "30s",
           "preserveDigest": true,
           "content": [
             {

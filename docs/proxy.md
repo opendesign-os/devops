@@ -76,7 +76,7 @@ git config --global http.https://github.com/.proxy http://127.0.0.1:7898
 sudo git config --global http.https://github.com/.proxy http://127.0.0.1:7898
 ```
 
-然后重试克隆，完整步骤见 [deploy.md](deploy.md) 第五节第 1 步：
+然后重试克隆，完整步骤见 [deploy.md](deploy.md) 第二节第 1 步：
 
 ```bash
 sudo git clone https://github.com/opendesign-os/devops.git /srv/devops

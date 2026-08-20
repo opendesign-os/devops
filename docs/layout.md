@@ -21,7 +21,7 @@
 
 仓库里只有三个骨架目录（`template/`、`deploy/`、`registry/`），其余四类都不进版本控制 —— 要么是构建产物，要么是运行时状态，要么是密钥。
 
-机器 A 的 `/srv/devops` 是本仓库的检出，Zot 就在 `/srv/devops/registry` 下启动、就地读里面的配置，克隆与更新见 [deploy.md](deploy.md) 第五节第 1 步。机器 B 没有检出，它的编排与 `.env` 由 Dokploy 经 SSH 下发。检出里的文件不手工改 —— 改动一律回本仓库 push 再 pull。
+机器 A 的 `/srv/devops` 是本仓库的检出，Zot 就在 `/srv/devops/registry` 下启动、就地读里面的配置，克隆与更新见 [deploy.md](deploy.md) 第二节第 1 步。机器 B 没有检出，它的编排与 `.env` 由 Dokploy 经 SSH 下发。检出里的文件不手工改 —— 改动一律回本仓库 push 再 pull。
 
 服务落在哪台机器由 Dokploy 服务的 **Server** 字段决定，同一项目的服务可以分散在两台上；下面各节按当前分布写：自研应用在机器 B，Plane 在机器 A。
 

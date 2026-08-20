@@ -2,7 +2,7 @@
 
 Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，变量填在 Dokploy UI。建服务、配域名、Deploy 的通用流程见 [deploy.md](deploy.md) 第七节，本文只写 Plane 特有的部分。
 
-本文引用的文件路径以本仓库已克隆在机器 A 的 `/srv/devops` 为前提，克隆步骤见 [deploy.md](deploy.md) 第五节第 1 步。
+本文引用的文件路径以本仓库已克隆在机器 A 的 `/srv/devops` 为前提，克隆步骤见 [deploy.md](deploy.md) 第二节第 1 步。
 
 | 项 | 位置 |
 |---|---|
@@ -74,5 +74,15 @@ docker run --rm -v plane_uploads:/data -v /srv/backup:/backup alpine tar czf /ba
 ```
 
 容器名与卷名的前缀由 Dokploy 生成，用 `docker ps` 与 `docker volume ls` 确认实际名称后再执行。
+
+恢复前在 Dokploy 里 Stop 这个服务，恢复完再 Deploy：
+
+```bash
+gunzip -c /srv/backup/plane-<日期>.sql.gz | docker exec -i $(docker ps -aqf name=plane-db) psql -U plane plane
+```
+
+```bash
+docker run --rm -v plane_uploads:/data -v /srv/backup:/backup alpine sh -c 'cd /data && tar xzf /backup/plane-uploads-<日期>.tar.gz'
+```
 
 这两项都属于不可再生数据，必须每日备份，分级见 [layout.md](layout.md) 第一节。

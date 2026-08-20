@@ -3,7 +3,7 @@
 Zot 是 CNCF 的 OCI 原生镜像仓库，单进程单容器，常驻内存 100~200 MB。
 它在本方案里同时承担两件事：存自研镜像（`apps/`）、代理缓存公共镜像（`docker/`）。
 
-**安装步骤不在本文。** 克隆仓库、建目录、生成账号、启动、验证、登录，全部在 [deploy.md](deploy.md) 第五节，按那里一路做下来即可。本文只讲配置项含义、授权规则、保留策略调参与日常运维。
+**安装步骤不在本文。** 检出仓库是 [deploy.md](deploy.md) 第二节第 1 步；建目录、生成账号、启动、验证、登录在它的第五节，按顺序做下来即可。本文只讲配置项含义、授权规则、保留策略调参与日常运维。
 
 ## 一、环境与设计取舍
 
@@ -93,6 +93,20 @@ sudo tar czf /srv/backup/registry-conf-$(date +%F).tar.gz -C /srv/registry htpas
 
 只备 `htpasswd` 就够：`config.json` 与 `compose.yaml` 在本仓库里，`git pull` 随时取回；`htpasswd` 是现场生成的，丢了两台机器都得重新 `docker login`。
 
+恢复：先停容器，再把镜像层与口令放回原处，最后起容器。
+
+```bash
+cd /srv/devops/registry && sudo docker compose down
+```
+
+```bash
+sudo rsync -a /srv/backup/registry/ /srv/registry/data/ && sudo tar xzf /srv/backup/registry-conf-<日期>.tar.gz -C /srv/registry
+```
+
+```bash
+cd /srv/devops/registry && sudo docker compose up -d
+```
+
 `data/docker/` 是代理缓存，丢了会自动回源，磁盘紧张时可以从备份里排除：
 
 ```bash
@@ -105,12 +119,16 @@ rsync -a --delete --exclude 'docker/' /srv/registry/data/ /srv/backup/registry/
 
 `docker compose` 相关命令都在检出目录 `/srv/devops/registry` 下执行 —— compose 认的是当前目录里的 `compose.yaml`。curl 与 du 在哪个目录都行。
 
+配置改动一律走仓库：改本地 → push → 机器 A `git pull` → 重启容器。不要在服务器上就地改 —— `config.json` 是单文件 bind mount，`git pull` 与 `sed -i` 都会换 inode，容器里挂的仍是旧 inode 的内容，不重启不生效；就地改还会让下次 pull 冲突。
+
 | 操作 | 命令 |
 |---|---|
 | 查看状态 | `sudo docker compose ps` |
 | 启动 / 停止 | `sudo docker compose up -d` / `sudo docker compose down` |
 | 查看日志 | `sudo docker logs -f zot` |
-| 改完 config.json 后生效 | 先把改动 push 回仓库，再 `sudo git -C /srv/devops pull && sudo docker compose restart` |
+| 改完 `config.json` 后生效 | 改动 push 回仓库，机器 A `sudo git -C /srv/devops pull`，再 `sudo docker compose restart` |
+| 改完 `compose.yaml` 后生效 | 同上，但最后一步必须 `sudo docker compose up -d` —— `restart` 不重建容器，新的 `ports`、`image`、`volumes` 不会生效 |
+| 服务器上被就地改过、pull 被拒 | `sudo git -C /srv/devops checkout -- registry/<文件>` 丢掉本地改动后再 pull |
 | 存活检查 | `curl -s -o /dev/null -w '%{http_code}\n' http://registry.internal:5000/v2/`，期望 `401` |
 | 磁盘占用 | `sudo du -sh /srv/registry/data/*` |
 | 列出仓库 | `curl -s -u ci http://registry.internal:5000/v2/_catalog` |
