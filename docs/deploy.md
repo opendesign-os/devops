@@ -6,7 +6,7 @@
 
 ## 一、前提
 
-**系统 Alibaba Cloud Linux 3**（RHEL 系，内核 5.10）。命令按它写：包管理用 `dnf`，入站靠阿里云安全组。
+**系统 Alibaba Cloud Linux 4**（RHEL 系，内核 6.6）。命令按它写：包管理用 `dnf`，入站靠阿里云安全组。
 
 | | 机器 A | 机器 B |
 |---|---|---|
@@ -110,7 +110,7 @@ sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
 
 ### 3 · 装 Docker
 
-`get.docker.com` 不认 `alinux`，改用 CentOS 源。`$releasever` 那步 sed 不能省 —— alinux 的值是 3，docker-ce 源没有 3 的目录。
+`get.docker.com` 不认 `alinux`，改用 CentOS 源。`$releasever` 那步 sed 不能省 —— alinux 4 的 `$releasever` 是 `4`，docker-ce 源里没有这个目录，替换成 `8` 才能装上。
 
 ```bash
 sudo dnf install -y dnf-utils && sudo dnf config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo && sudo sed -i 's/$releasever/8/g' /etc/yum.repos.d/docker-ce.repo && sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && sudo systemctl enable --now docker
@@ -120,12 +120,12 @@ sudo dnf install -y dnf-utils && sudo dnf config-manager --add-repo https://mirr
 
 ### 4 · 装 WireGuard 并生成密钥
 
-alinux 官方源里没有任何 wireguard 包，必须挂 EPEL。`epel-release` 是 CentOS 的包名，这里装不了，直接写源文件；版本写死 8，同样因为 `$releasever` 是 3。内核 5.10 已内置 wg 模块，只装 tools。
+alinux 官方源里没有任何 wireguard 包，必须挂 EPEL。`epel-release` 是 CentOS 的包名，这里装不了，直接写源文件；版本写死 8，同样因为 `$releasever`（`4`）在 EPEL 里没有对应目录。内核 6.6 已内置 wg 模块，只装 tools。
 
 ```bash
 sudo tee /etc/yum.repos.d/epel.repo > /dev/null <<'EOF'
 [epel]
-name=EPEL for Alibaba Cloud Linux 3
+name=EPEL for Alibaba Cloud Linux 4
 baseurl=https://mirrors.aliyun.com/epel/8/Everything/$basearch
 enabled=1
 gpgcheck=1
@@ -533,9 +533,16 @@ Plane 是 13 个容器的第三方栈，用 **Compose** 类型。
 4. Provider 选 **Git**：Repository URL 填 `https://gitee.com/<组织>/plane.git`，Branch 填 `master`（Gitee 默认），Compose Path 改成 `./compose.yaml`（默认值 `./docker-compose.yml` 在仓库里不存在），Save。私有仓库要点 **Add SSH Key** 选一把密钥、把公钥加到该仓库的部署公钥，地址换成 `git@gitee.com:<组织>/plane.git`。这一页没有 Server 字段：Plane 跑机器 A，就是 Dokploy 本机，默认即可
 5. Environment 粘 [deploy/env/plane.env](../deploy/env/plane.env) 的全部内容，逐项改必改值（密钥、密码、域名），公共项保持 `${{project.REGISTRY_CACHE}}` 这样的引用（变量放在环境层时前缀改成 `${{environment.` ）；必改清单见 [plane.md](plane.md) 第二节。填完点 Provider 页的 **Preview Compose** 核对：镜像应渲染成 `registry.internal:5000/docker/makeplane/...`，出现 `docker.io/` 说明引用没替换成功 —— compose 写的是 `${REGISTRY_CACHE:-docker.io}`，取不到值会静默直连 Docker Hub
 6. 安全组放行机器 A 的 4141 —— compose 里 `proxy` 映射的是 `4141:80`，访问地址就是 `http://<机器A公网IP>:4141`，不经 Traefik，不用配 Domains。换端口要避开 80、443、8080（Traefik）、3000（面板）、5000（Zot），撞上会报 `port is already allocated`
-7. 点 **Deploy**，在 Logs 里看 13 个镜像回源与 `migrator` 迁移，首次 3~10 分钟
-8. 要 push 即部署就在 General 打开 Auto Deploy，把 Webhook URL 加到该仓库的 WebHooks，事件选 Push
-9. 起来后按 [plane.md](plane.md) 第三节建实例管理员、配 SMTP、建工作区
+7. **先在机器 A 上预热镜像，别直接点 Deploy。** Zot 的 on-demand 回源是同步阻塞的，10 个镜像并发触发会全部报 `EOF` 把部署带死，原因见 [registry.md](registry.md) 第七节。挂后台串行拉，带重试，约 20~40 分钟：
+
+   ```bash
+   nohup bash -c 'for i in makeplane/plane-proxy:v1.4.1 makeplane/plane-backend:v1.4.1 makeplane/plane-frontend:v1.4.1 makeplane/plane-space:v1.4.1 makeplane/plane-admin:v1.4.1 makeplane/plane-live:v1.4.1 library/postgres:15.7-alpine library/rabbitmq:3.13.6-management-alpine valkey/valkey:7.2.11-alpine minio/minio:latest; do for t in $(seq 10); do docker pull registry.internal:5000/docker/$i >/dev/null 2>&1 && { echo "OK   $i（第 $t 次）"; break; }; [ $t = 10 ] && echo "FAIL $i"; sleep 5; done; done; echo DONE' > /root/prewarm.log 2>&1 &
+   ```
+
+   看进度：`cat /root/prewarm.log`。日志出现 `DONE` 且没有 `FAIL` 才继续。换 `APP_RELEASE` 版本号时这一步要重做一遍
+8. 点 **Deploy**，在 Logs 里看 `migrator` 迁移。镜像已预热的话全部本地命中，2~3 分钟起完
+9. 要 push 即部署就在 General 打开 Auto Deploy，把 Webhook URL 加到该仓库的 WebHooks，事件选 Push
+10. 起来后按 [plane.md](plane.md) 第三节建实例管理员、配 SMTP、建工作区
 
 每个栈一个部署仓库，push 只触发它自己的服务。换别的第三方栈就在 Gitee 另建一个仓库、根目录同样放 `compose.yaml`，Server 换成它的运行机器；通用骨架见 [deploy/projects/example/compose.yaml](../deploy/projects/example/compose.yaml)，自研应用的卷写成 `${APPDATA_ROOT}/<app>/<子目录>`，原因见 [layout.md](layout.md) 第四节。
 
@@ -604,7 +611,21 @@ sudo git -C /srv/devops pull
 sudo git -C /srv/devops checkout -- registry/config.json && sudo git -C /srv/devops pull
 ```
 
-pull 只换文件，不会让运行中的容器生效：改了 `config.json` 用 `docker compose restart`，改了 `compose.yaml` 用 `docker compose up -d`。
+pull 只换文件，不会让运行中的容器生效。下面两条都必须在 **`/srv/devops/registry`** 下执行 —— compose 认的是当前目录里的 `compose.yaml`，在别的目录跑会报找不到编排文件。
+
+改了 `registry/config.json`：
+
+```bash
+cd /srv/devops/registry && sudo docker compose restart
+```
+
+改了 `registry/compose.yaml`：
+
+```bash
+cd /srv/devops/registry && sudo docker compose up -d
+```
+
+后者不能用 `restart` 代替 —— `restart` 不重建容器，新的 `ports`、`image`、`volumes` 不会生效。
 
 Dokploy 升级会重启面板与 Traefik，面板短暂不可用，业务容器不受影响 —— 挑没有部署任务在跑的时候做。
 

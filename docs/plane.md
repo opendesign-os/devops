@@ -43,9 +43,9 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 
 ## 三、初始化
 
-按 [deploy.md](deploy.md) 第七节建好服务并填完变量后，点 Deploy。首次要经代理缓存回源约 5 GB 镜像，`migrator` 迁移完成后 `api` 才启动，整体 3~10 分钟。在 Logs 里观察，`migrator` 退出码 0 属正常。
+按 [deploy.md](deploy.md) 第七节建好服务并填完变量后，**先做该节第 7 步的镜像预热，再点 Deploy**。预热过了镜像全部本地命中，`migrator` 迁移完成后 `api` 才启动，整体 2~3 分钟。在 Logs 里观察，`migrator` 退出码 0 属正常。
 
-首次拉取会在短时间内向 Docker Hub 发起 13 个镜像的回源请求，可能触碰匿名拉取的速率限制。若某个镜像卡住，等几分钟重新 Deploy 即可，已缓存的部分不会重拉。
+跳过预热直接 Deploy 会失败，且报错具有误导性：Zot 的 on-demand 回源是同步阻塞的，10 个镜像并发触发时客户端全部等不及先断开，日志里是一条 `EOF` 加一片 `Interrupted`，看不出真实原因。机制与判读方法见 [registry.md](registry.md) 第七节。
 
 ### 1 · 创建实例管理员
 

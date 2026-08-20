@@ -97,6 +97,21 @@
       "enable": true,
       "registries": [
         {
+          "urls": ["https://docker.1panel.live"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 3,
+          "retryDelay": "30s",
+          "preserveDigest": true,
+          "content": [
+            {
+              "prefix": "makeplane/**",
+              "destination": "/docker",
+              "stripPrefix": false
+            }
+          ]
+        },
+        {
           "urls": ["https://docker.m.daocloud.io"],
           "onDemand": true,
           "tlsVerify": true,

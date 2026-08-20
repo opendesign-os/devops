@@ -48,7 +48,7 @@ flowchart LR
 |---|---|
 | [docs/deploy.md](docs/deploy.md) | 全部部署操作步骤，从零到跑起来，唯一来源 |
 | [docs/layout.md](docs/layout.md) | 代码、部署文件、变量、镜像、CI/CD 五类资产的存放规范 |
-| [docs/registry.md](docs/registry.md) | Zot 的配置项、授权、保留策略与运维，不含安装步骤 |
+| [docs/registry.md](docs/registry.md) | Zot 的配置项、授权、保留策略、回源上游与运维，不含安装步骤 |
 | [docs/plane.md](docs/plane.md) | 在机器 A 用 Dokploy 部署 Plane：变量必改项、初始化、备份与升级 |
 | [docs/proxy.md](docs/proxy.md) | 借本机 Clash 给服务器临时开代理，及其删除 |
 
