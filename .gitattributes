@@ -1,7 +1,5 @@
-# 所有文本文件在工作区和仓库中一律使用 LF
 * text=auto eol=lf
 
-# 二进制文件不做换行转换
 *.png binary
 *.jpg binary
 *.ico binary

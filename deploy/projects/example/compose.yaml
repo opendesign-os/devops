@@ -1,7 +1,3 @@
-# 多容器自研应用的编排模板（单容器应用直接用 Dokploy 的 Application 类型，不需要本文件）
-# 在 Dokploy 中创建 Compose 服务，Provider 选 Git，指向本仓库此文件路径
-# 变量由 Dokploy 写入同目录 .env，compose 自动读取用于插值
-
 services:
   app:
     image: ${REGISTRY}/${REGISTRY_NS}/${APP_NAME}:${IMAGE_TAG}
@@ -9,8 +5,6 @@ services:
     environment:
       TZ: ${TZ}
     volumes:
-      # 自研应用的持久化数据用 bind mount：路径可见、备份直观、容器内 UID 由自己的
-      # Dockerfile 决定。第三方栈请改用命名卷，原因见 docs/layout.md 第四节
       - ${APPDATA_ROOT}/${APP_NAME}/data:/app/data
     networks:
       - default
@@ -22,6 +16,5 @@ services:
         max-file: ${LOG_MAX_FILE}
 
 networks:
-  # Traefik 经此网络路由到容器，Dokploy 已创建
   dokploy-network:
     external: true

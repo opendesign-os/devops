@@ -7,6 +7,7 @@
 ```mermaid
 flowchart LR
   dev["开发者本机"]
+  github["GitHub<br/>本仓库 devops<br/>手册 · Zot 配置 · 骨架"]
   gitee["Gitee<br/>应用仓库 · 部署仓库"]
   user["用户浏览器"]
 
@@ -22,18 +23,22 @@ flowchart LR
     app["自研应用<br/>/srv/appdata"]
   end
 
+  dev -->|push| github
   dev -->|push| gitee
-  gitee -->|"webhook :80"| dokploy
+  github -->|"克隆到 /srv/devops"| zot
+  gitee -->|"webhook :80"| tfa
+  tfa --> dokploy
   dev -.->|"SSH 隧道 3000 / 5000"| dokploy
   dokploy -->|推镜像| zot
   dokploy -.->|"SSH 下发 compose 与 .env"| app
   plane -->|拉镜像| zot
   app -.->|"拉镜像 · WireGuard"| zot
-  tfa --> plane
   tfb --> app
-  user -->|plane.example.com| tfa
+  user -->|":8080"| plane
   user -->|各应用域名| tfb
 ```
+
+代码托管分两处：**本仓库在 GitHub**，只放手册、Zot 配置与骨架，克隆到机器 A；**应用仓库与部署仓库在 Gitee**，Dokploy 从 Gitee 检出代码与编排，webhook 也由 Gitee 发。
 
 镜像只有一个产地：Dokploy 在机器 A 构建后推 Zot，两台机器都从 Zot 拉，公共镜像也经它的 `docker/` 前缀回源缓存。
 
@@ -44,7 +49,7 @@ flowchart LR
 | [docs/deploy.md](docs/deploy.md) | 全部部署操作步骤，从零到跑起来，唯一来源 |
 | [docs/layout.md](docs/layout.md) | 代码、部署文件、变量、镜像、CI/CD 五类资产的存放规范 |
 | [docs/registry.md](docs/registry.md) | Zot 的配置项、授权、保留策略与运维，不含安装步骤 |
-| [docs/plane.md](docs/plane.md) | Plane 的变量配置与初始化 |
+| [docs/plane.md](docs/plane.md) | 在机器 A 用 Dokploy 部署 Plane：变量必改项、初始化、备份与升级 |
 | [docs/proxy.md](docs/proxy.md) | 借本机 Clash 给服务器临时开代理，及其删除 |
 
 新装照 [docs/deploy.md](docs/deploy.md) 从上到下做一遍；日常运维查它的第八节。

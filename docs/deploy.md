@@ -14,7 +14,7 @@
 | 隧道地址 | `10.8.0.1`（`registry.internal`） | `10.8.0.2` |
 | 域名 | `ci.example.com` + 跑在 A 的应用域名（Plane） | 跑在 B 的应用域名 |
 
-- Gitee 只用 WebHooks 与部署公钥，**不使用 Gitee Go**
+- 本仓库在 GitHub，克隆到机器 A；应用仓库与部署仓库在 Gitee，只用它的 WebHooks 与部署公钥，**不使用 Gitee Go**
 - 全程 **不勾选 Let's Encrypt**；Dokploy 面板与 Zot UI 都只经 SSH 隧道访问
 
 ### 需要替换的值
@@ -29,7 +29,7 @@
 | `<机器A私钥>` `<机器A公钥>` | 第二节第 3 步在机器 A 上生成 |
 | `<机器B私钥>` `<机器B公钥>` | 第二节第 3 步在机器 B 上生成 |
 | `ci.example.com` | 换成你给机器 A 准备的真实域名 |
-| `plane.example.com` | 换成各应用的真实域名 |
+| `plane.example.com` | 换成各应用的真实域名，Plane 当前用 `<机器A公网IP>:8080` |
 
 **下面这些是固定值，不要改成公网 IP：**
 
@@ -49,6 +49,7 @@
 |---|---|---|---|---|
 | A | 22 | TCP | 限管理 IP | `SSH 管理入口，限办公网 IP` |
 | A | 80 | TCP | 全部 | `Gitee webhook 与跑在 A 的应用域名入口（Traefik）` |
+| A | 8080 | TCP | 全部 | `Plane 入口，映射到 proxy 容器的 80` |
 | A | 51820 | **UDP** | `<机器B公网IP>/32` | `WireGuard 隧道入口，仅机器B接入，用于拉取 Zot 私有镜像` |
 | B | 22 | TCP | 限管理 IP | `SSH 管理入口，限办公网 IP` |
 | B | 80 | TCP | 全部 | `应用域名入口（Traefik）` |
@@ -521,30 +522,36 @@ ls /etc/dokploy
 
 ## 七、新项目接入
 
-每个服务用 **Server** 字段选运行机器，同一项目里的服务可以分散在两台机器上。当前分布：自研应用跑机器 B，Plane 跑机器 A。镜像一律在机器 A 构建后推 Zot，与服务跑在哪台无关。
+服务默认跑在 Dokploy 所在的机器 A，要放到机器 B 就在 Create Service 时选 **Server**，同一项目的服务可以分散在两台机器上。当前分布：自研应用跑机器 B，Plane 跑机器 A。镜像一律在机器 A 构建后推 Zot，与服务跑在哪台无关。
 
-**应用仓库**：在本机克隆本仓库，把 `template/` 内容复制到应用仓库根，按语言改 `docker/Dockerfile`，推到 Gitee，在「管理 → 部署公钥」勾选 Dokploy 的公钥。服务器上的 `/srv/devops/template/` 只作对照，代码不在服务器上改。
+### 示例：在机器 A 部署 Plane
 
-**单容器应用**用 Application 类型：
+Plane 是 13 个容器的第三方栈，用 **Compose** 类型。
 
-1. Create Project，在 Shared Environment Variables 填公共变量，对照 [deploy/env/common.env](../deploy/env/common.env)
-2. Create Service → Application，Server 选运行机器（自研应用选**机器 B**），Provider 选 Custom Git，Build Type 选 Dockerfile 指向 `docker/Dockerfile`
+1. 在 Gitee 建 Plane 的部署仓库（如 `pku-bigdata_1_0/plane`），根目录放 `compose.yaml` 并 **push**，内容取本仓库 [deploy/projects/plane/compose.yaml](../deploy/projects/plane/compose.yaml)：镜像写成 `${REGISTRY_CACHE}/makeplane/plane-backend:${APP_RELEASE}` 这种形式走 Zot 代理缓存，数据用命名卷，网络接入 `dokploy-network` external
+2. 面板 → Create Project，名字填 `plane`；进去后默认在 `production` 环境，点右上 **Project Environment** 填公共变量 `REGISTRY`、`REGISTRY_NS`、`REGISTRY_CACHE`、`APPDATA_ROOT`、`TZ`，值对照 [deploy/env/common.env](../deploy/env/common.env)，Save
+3. 点 **+ Create Service** → **Compose**，Name 填 `plane`
+4. Provider 选 **Git**：Repository URL 填 `https://gitee.com/<组织>/plane.git`，Branch 填 `master`（Gitee 默认），Compose Path 改成 `./compose.yaml`（默认值 `./docker-compose.yml` 在仓库里不存在），Save。私有仓库要点 **Add SSH Key** 选一把密钥、把公钥加到该仓库的部署公钥，地址换成 `git@gitee.com:<组织>/plane.git`。这一页没有 Server 字段：Plane 跑机器 A，就是 Dokploy 本机，默认即可
+5. Environment 粘 [deploy/env/plane.env](../deploy/env/plane.env) 的全部内容，逐项改必改值（密钥、密码、域名），公共项保持 `${{project.REGISTRY_CACHE}}` 这样的引用（变量放在环境层时前缀改成 `${{environment.` ）；必改清单见 [plane.md](plane.md) 第二节。填完点 Provider 页的 **Preview Compose** 核对：镜像应渲染成 `registry.internal:5000/docker/makeplane/...`，出现 `docker.io/` 说明引用没替换成功 —— compose 写的是 `${REGISTRY_CACHE:-docker.io}`，取不到值会静默直连 Docker Hub
+6. 安全组放行机器 A 的 8080 —— compose 里 `proxy` 映射的是 `8080:80`，访问地址就是 `http://<机器A公网IP>:8080`，不经 Traefik，不用配 Domains
+7. 点 **Deploy**，在 Logs 里看 13 个镜像回源与 `migrator` 迁移，首次 3~10 分钟
+8. 要 push 即部署就在 General 打开 Auto Deploy，把 Webhook URL 加到该仓库的 WebHooks，事件选 Push
+9. 起来后按 [plane.md](plane.md) 第三节建实例管理员、配 SMTP、建工作区
+
+每个栈一个部署仓库，push 只触发它自己的服务。换别的第三方栈就在 Gitee 另建一个仓库、根目录同样放 `compose.yaml`，Server 换成它的运行机器；通用骨架见 [deploy/projects/example/compose.yaml](../deploy/projects/example/compose.yaml)，自研应用的卷写成 `${APPDATA_ROOT}/<app>/<子目录>`，原因见 [layout.md](layout.md) 第四节。
+
+### 自研应用
+
+单容器用 **Application** 类型，多容器改用 Compose 类型、步骤同上。
+
+先备好应用仓库：在本机克隆本仓库（GitHub），把 `template/` 内容复制到 Gitee 应用仓库的根，按语言改 `docker/Dockerfile`，推到 Gitee，在「管理 → 部署公钥」勾选 Dokploy 的公钥。服务器上的 `/srv/devops/template/` 只作对照，代码不在服务器上改。`docker/Dockerfile` 里的 `HEALTHCHECK` 必须保留 —— Dokploy 按容器健康状态判定部署成败。
+
+1. Create Project 或复用已有项目，公共变量填在项目的 **Project Environment**，同上面第 2 步
+2. Create Service → **Application**，**Server 选机器 B**，Provider 选 Custom Git 指向 Gitee 应用仓库，Build Type 选 Dockerfile 指向 `docker/Dockerfile`
 3. Environment 填服务变量，公共项用 `${{project.VAR}}` 引用
-4. Domains 加域名与容器端口，不勾 Let's Encrypt
-5. General 打开 Auto Deploy，复制 Webhook URL
-6. Gitee 仓库 → 管理 → WebHooks → 添加，粘贴上一步的 URL，事件选 Push
-
-**多容器或第三方栈**用 Compose 类型：
-
-1. 在部署仓库加 `projects/<project>/compose.yaml`，参照本仓库 [deploy/projects/example/compose.yaml](../deploy/projects/example/compose.yaml)（服务器上是 `/srv/devops/deploy/projects/example/compose.yaml`），网络加 `dokploy-network` external
-2. 自研应用的卷写成 `${APPDATA_ROOT}/<app>/<子目录>`；第三方栈保持命名卷，原因见 [layout.md](layout.md) 第四节
-3. Create Service → Compose，Provider 选 Git 指向部署仓库与该文件路径，Server 选运行机器
-4. Environment 填变量，Dokploy 会写成 `.env` 放在 compose 同目录
-5. Domains 选要暴露的 service 名与端口
-
-首次点 Deploy，之后 push 即自动触发。
-
-Plane 走 Compose 类型，Server 选**机器 A**，变量必改项与初始化步骤见 [plane.md](plane.md)。
+4. Domains 加域名与容器端口，HTTPS 关闭
+5. General 打开 Auto Deploy，复制 Webhook URL，加到应用仓库 → 管理 → WebHooks，事件选 Push
+6. 首次手工点一次 Deploy，之后 push 即自动触发
 
 ## 八、日常操作
 

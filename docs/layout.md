@@ -11,7 +11,7 @@
 | 资产 | 权威副本 | 本仓库骨架 | 服务器上的落点 |
 |---|---|---|---|
 | 项目代码 | Gitee 应用仓库 | `template/` | 机器 A 的 Dokploy 检出；机器 B 没有 |
-| 部署文件 | Gitee 部署仓库 | `deploy/projects/` | 机器 A 检出，再由 Dokploy 下发到服务的运行机器 |
+| 部署文件 | 各栈自己的 Gitee 部署仓库 | `deploy/projects/` | 机器 A 检出，再由 Dokploy 下发到服务的运行机器 |
 | 部署手册与骨架 | 本仓库（GitHub `opendesign-os/devops`） | 全部 | 机器 A 的 `/srv/devops`，Zot 就在 `/srv/devops/registry` 下启动 |
 | 环境变量 | 机器 A 的 Dokploy 数据库 | `deploy/env/`（清单，不是真值） | 运行机器上的 `.env`，由 Dokploy 写 |
 | 镜像文件 | 机器 A 的 Zot | 无，构建产物不入库 | `/srv/registry/data/` |

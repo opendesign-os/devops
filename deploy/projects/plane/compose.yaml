@@ -46,7 +46,6 @@ x-live-env: &live-env
   API_BASE_URL: http://api:8000
   LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY}
 
-# 连接串由账号密码直接拼装，改密码只需改 .env 一处
 x-app-env: &app-env
   WEB_URL: ${WEB_URL}
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
@@ -61,7 +60,6 @@ x-app-env: &app-env
   AUTHENTICATION_RATE_LIMIT: ${AUTHENTICATION_RATE_LIMIT}
 
 services:
-  # 数据库迁移，一次性任务，跑完退出
   migrator:
     image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-backend:${APP_RELEASE}
     command: ./bin/docker-entrypoint-migrator.sh
@@ -177,7 +175,6 @@ services:
       retries: 20
       start_period: 30s
 
-  # 使用外部 S3/OSS 时可删除本服务，并在 .env 中改 AWS_* 配置
   plane-minio:
     image: ${REGISTRY_CACHE:-docker.io}/minio/minio:latest
     command: server /export --console-address ":9090"
@@ -187,11 +184,11 @@ services:
     volumes:
       - uploads:/export
 
-  # 内部入口，不映射宿主机端口。在 Dokploy 里给本服务配域名，
-  # 由 Traefik 经 dokploy-network 路由到此容器的 80 端口
   proxy:
     image: ${REGISTRY_CACHE:-docker.io}/makeplane/plane-proxy:${APP_RELEASE}
     restart: unless-stopped
+    ports:
+      - "8080:80"
     environment:
       <<: *proxy-env
     volumes:

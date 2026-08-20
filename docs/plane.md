@@ -6,11 +6,11 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 
 | 项 | 位置 |
 |---|---|
-| 编排文件 | 部署仓库 `projects/plane/compose.yaml`，骨架是本仓库 [../deploy/projects/plane/compose.yaml](../deploy/projects/plane/compose.yaml)（服务器上 `/srv/devops/deploy/projects/plane/compose.yaml`） |
+| 编排文件 | Gitee 部署仓库 `plane` 根目录的 `compose.yaml`，骨架是本仓库 [../deploy/projects/plane/compose.yaml](../deploy/projects/plane/compose.yaml)（机器 A 上 `/srv/devops/deploy/projects/plane/compose.yaml`） |
 | 变量清单 | [../deploy/env/plane.env](../deploy/env/plane.env)（服务器上 `/srv/devops/deploy/env/plane.env`），实际填在 Dokploy 服务的 Environment |
 | 运行机器 | 机器 A，创建 Compose 服务时 Server 选机器 A |
 | 数据存放 | 机器 A 的 docker 命名卷（第三方栈不用 bind mount，原因见 [layout.md](layout.md) 第四节） |
-| 域名 | Dokploy 的 Domains 里指向 `proxy` 服务的 80 端口，DNS 解析到 `<机器A公网IP>` |
+| 访问地址 | `http://<机器A公网IP>:8080`，compose 里 `proxy` 映射 `8080:80`，不经 Traefik |
 
 ## 一、环境要求
 
@@ -19,7 +19,7 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 | 内存 | 13 个容器空载常驻约 3 GB，与机器 A 的 Dokploy 构建、Zot 叠加算；8 GB 机器靠准备阶段挂的 4 GB swap 撑构建高峰 |
 | 磁盘 | 镜像约 5 GB，另留 20 GB 给数据库与附件；机器 A 的 120 GB 还要给 Zot 预留 60 GB，先算余量 |
 | 镜像来源 | 全部经 Zot 的 `docker/` 前缀拉取，onDemand 模式首次请求时自动回源，**不需要预先建项目或推送** |
-| 对外 | 不映射宿主机端口，由 Traefik 按域名路由到 `proxy` 容器 |
+| 对外 | `proxy` 映射宿主机 8080 到容器 80，安全组要放行 8080 |
 
 ## 二、变量配置
 
@@ -31,9 +31,11 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 |---|---|
 | `SECRET_KEY`、`LIVE_SERVER_SECRET_KEY` | 各用 `openssl rand -hex 32` 生成 |
 | `POSTGRES_PASSWORD`、`RABBITMQ_PASSWORD`、`AWS_SECRET_ACCESS_KEY` | 各用 `openssl rand -hex 16` 生成 |
-| `APP_DOMAIN`、`WEB_URL`、`CORS_ALLOWED_ORIGINS` | 换成真实域名，后两者带 `http://` |
+| `APP_DOMAIN`、`WEB_URL`、`CORS_ALLOWED_ORIGINS` | 换成 `<机器A公网IP>:8080`，后两者带 `http://` |
 
-保持不动：`SITE_ADDRESS=:80`、`CERT_EMAIL=` 留空、`MINIO_ENDPOINT_SSL=0`（全站 HTTP，不签证书）。公共变量用 `${{project.REGISTRY_CACHE}}` 引用，不要重复定义。
+保持不动：`SITE_ADDRESS=:80`（容器内 Caddy 的监听端口，与宿主机的 8080 无关）、`CERT_EMAIL=` 留空、`MINIO_ENDPOINT_SSL=0`（全站 HTTP，不签证书）。公共变量用 `${{project.REGISTRY_CACHE}}` 引用，不要重复定义。
+
+用外部 S3/OSS 的话，删掉 compose 里的 `plane-minio` 服务，把 `AWS_*` 换成对象存储的地址与密钥。
 
 将来切 HTTPS 时，这三处要同步改：`WEB_URL` 与 `CORS_ALLOWED_ORIGINS` 换成 `https://`、`MINIO_ENDPOINT_SSL` 改为 `1`，否则附件与图片会加载失败。
 
@@ -47,7 +49,7 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 
 ### 1 · 创建实例管理员
 
-浏览器打开 `http://plane.example.com/god-mode/`，在 "Let's secure your instance" 页设置管理员邮箱与密码。
+浏览器打开 `http://<机器A公网IP>:8080/god-mode/`，在 "Let's secure your instance" 页设置管理员邮箱与密码。
 
 ### 2 · 配置 SMTP
 
@@ -55,7 +57,7 @@ God Mode → Email 填写 SMTP 并发测试邮件。不配则邀请成员、找�
 
 ### 3 · 创建工作区
 
-访问 `http://plane.example.com/`，登录后创建 Workspace 和 Project，邀请成员。
+访问 `http://<机器A公网IP>:8080/`，登录后创建 Workspace 和 Project，邀请成员。
 
 ## 四、运维与备份
 

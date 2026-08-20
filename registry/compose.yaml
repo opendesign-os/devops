@@ -1,21 +1,9 @@
-# Zot 自身的编排，在机器 A 上手工 docker compose up -d 启动。
-#
-# 为什么不交给 Dokploy 管：Dokploy 部署任何服务都要先能拉镜像，
-# 镜像仓库反过来由 Dokploy 部署会形成循环依赖，重装时无法自举。
-#
-# 启动位置：机器 A 的 /srv/devops/registry，也就是本仓库的检出目录。
-# 本文件与 config.json 由容器就地读取；
-# 运行时状态（htpasswd 与镜像层）在 /srv/registry/，不进版本控制
-
 services:
   zot:
     image: ghcr.io/project-zot/zot-linux-amd64:${ZOT_VERSION:-v2.1.20}
     container_name: zot
     restart: unless-stopped
 
-    # 只监听 WireGuard 隧道地址，公网网卡上不开端口。
-    # 这样即使防火墙规则丢失，registry 也不会暴露到公网。
-    # 前提：wg0 必须先于 docker 启动，否则容器因绑不到地址而反复重启
     ports:
       - "10.8.0.1:5000:5000"
 
@@ -29,6 +17,3 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-
-    # 镜像基于 scratch，容器内没有 shell 与 wget/curl，
-    # 无法写 healthcheck。存活检查在宿主机执行，见 docs/registry.md 第六节

@@ -1,16 +1,10 @@
-# deploy/env/*.env 是变量清单模板，只含 change-me 占位符，正常入库。
-# 以下规则防止填了真实值的配置被误提交。
-
-# 真实环境变量文件
 .env
 .env.*
 *.local.env
 
-# Zot 的运行时状态只在机器 A 的 /srv/registry/，出现在检出里就是误操作，这两条兜底
 registry/htpasswd
 registry/data/
 
-# 编辑器与系统
 .DS_Store
 Thumbs.db
 *.swp
