@@ -18,7 +18,7 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 |---|---|
 | 内存 | 13 个容器空载常驻约 3 GB，与机器 A 的 Dokploy 构建、Zot 叠加算；8 GB 机器靠准备阶段挂的 4 GB swap 撑构建高峰 |
 | 磁盘 | 镜像约 5 GB，另留 20 GB 给数据库与附件；机器 A 的 120 GB 还要给 Zot 预留 60 GB，先算余量 |
-| 镜像来源 | 全部经 Zot 的 `docker/` 前缀拉取，onDemand 模式首次请求时自动回源，**不需要预先建项目或推送** |
+| 镜像来源 | 全部经 Zot 的 `docker/` 前缀拉取，不需要预先建项目或推送；但**必须先做 [deploy.md](deploy.md) 第七节第 7 步的预热**，onDemand 回源是同步阻塞的，并发触发会把部署带死 |
 | 对外 | `proxy` 映射宿主机 4141 到容器 80，安全组要放行 4141 |
 
 ## 二、变量配置
@@ -33,7 +33,24 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 | `POSTGRES_PASSWORD`、`RABBITMQ_PASSWORD`、`AWS_SECRET_ACCESS_KEY` | 各用 `openssl rand -hex 16` 生成 |
 | `APP_DOMAIN`、`WEB_URL`、`CORS_ALLOWED_ORIGINS` | 换成 `<机器A公网IP>:4141`，后两者带 `http://` |
 
-保持不动：`SITE_ADDRESS=:80`（容器内 Caddy 的监听端口，与宿主机的 4141 无关）、`CERT_EMAIL=` 留空、`MINIO_ENDPOINT_SSL=0`（全站 HTTP，不签证书）。公共变量用 `${{project.REGISTRY_CACHE}}` 引用，不要重复定义。
+保持不动：`SITE_ADDRESS=:80`（容器内 Caddy 的监听端口，与宿主机的 4141 无关）、`MINIO_ENDPOINT_SSL=0`（全站 HTTP，不签证书）。公共变量用 `${{project.REGISTRY_CACHE}}` 引用，不要重复定义。
+
+**`CERT_ACME_CA` 必须有值，哪怕压根不签证书** —— 这是唯一一个「留空即崩」的变量。proxy 镜像里 Caddyfile 第 28 行是
+
+```
+acme_ca {$CERT_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+```
+
+而 Caddy 的 `{$VAR:默认值}` 只在变量**未设置**时才用默认值；设成空字符串会老老实实替换成空，`acme_ca` 后面就没有参数了，Caddy 拒绝启动、容器无限重启：
+
+```
+Error: adapting config using caddyfile: parsing caddyfile tokens for 'acme_ca':
+wrong argument count or unexpected line ending after 'acme_ca', at /etc/caddy/Caddyfile:28
+```
+
+compose 里写的是 `CERT_ACME_CA: ${CERT_ACME_CA}`，取到空值也会把容器里这个变量设成空串 —— 「不填」和「未设置」在这里不是一回事。所以 `plane.env` 直接给它写死了 Let's Encrypt 的地址；`SITE_ADDRESS=:80` 是纯 HTTP，Caddy 不会真去签证书，这个值只为让 Caddyfile 解析通过。
+
+同段的 `CERT_EMAIL=` 与 `CERT_ACME_DNS=` 留空则没问题 —— 它们在 Caddyfile 里是独占一行的裸占位符，替换成空就是空行。
 
 用外部 S3/OSS 的话，删掉 compose 里的 `plane-minio` 服务，把 `AWS_*` 换成对象存储的地址与密钥。
 
@@ -46,6 +63,22 @@ Plane 以 Dokploy 的 **Compose 服务**接入，编排文件在部署仓库，�
 按 [deploy.md](deploy.md) 第七节建好服务并填完变量后，**先做该节第 7 步的镜像预热，再点 Deploy**。预热过了镜像全部本地命中，`migrator` 迁移完成后 `api` 才启动，整体 2~3 分钟。在 Logs 里观察，`migrator` 退出码 0 属正常。
 
 跳过预热直接 Deploy 会失败，且报错具有误导性：Zot 的 on-demand 回源是同步阻塞的，10 个镜像并发触发时客户端全部等不及先断开，日志里是一条 `EOF` 加一片 `Interrupted`，看不出真实原因。机制与判读方法见 [registry.md](registry.md) 第七节。
+
+### 0 · 部署后自检
+
+先确认稳定态是 **12 个 Up + `migrator` 退出码 0**，共 13 个：
+
+```bash
+sudo docker ps -a --filter name=plane --format '{{.Names}}\t{{.Status}}' | sed 's/.*w9oqcd-//' | sort
+```
+
+再从机器 A 本机探四个入口，全部应为 `200`：
+
+```bash
+for p in / /god-mode/ /spaces/ /api/instances/; do printf '%-18s ' "$p"; curl -s -o /dev/null -m 10 -w '%{http_code}\n' "http://127.0.0.1:4141$p"; done
+```
+
+`/api/instances/` 返回 `502` 而其余 200，多半是 `api` 刚重启、gunicorn 还在启动，等半分钟重试；持续 502 就看 `sudo docker logs plane-compose-*-api-1`。只有 `proxy` 在 `Restarting` 则看第二节的 `CERT_ACME_CA`。
 
 ### 1 · 创建实例管理员
 
